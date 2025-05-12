@@ -10,7 +10,13 @@ CONTAINS
      &           acgrdflx,achfx,aclhf                                 &
      &          ,acsnom,acsnow,snowfallac,akhs,akms,albedo,br,canwat  &
      &          ,chklowq,dt,dx,dx2d,area2d,dz8w,dzs,glw               &
-     &          ,grdflx,gsw,swdown,gz1oz0,hfx,ht,ifsnow,isfflx        &
+     &          ,grdflx,gsw,swdown,gz1oz0,hfx,hfx_rf,hfx_wl           & ! PX-LSM  ! UTK-Urban 
+     &          ,anthfx1,anthfx_rf,qfx_rf,lh_rf,tg_rf,t2_rf           & ! PX-LSM  ! UTK-Urban
+     &          ,tg_wl,t2_wl,t2_gnd,radwl,radwl_fnl,radst,radst_fnl   & ! PX-LSM  ! UTK-Urban
+     &          ,gsw_urb,gsw_wl,radnet,radnet_urb,radnet_rf,radnet_wl & ! PX-LSM  ! UTK-Urban
+     &          ,lwdn_urb,lwdn_rf,lwdn_wl,lwup_urb,lwup_rf,lwup_wl    & ! PX-LSM  ! UTK-Urban
+     &          ,gab_wl,gab_rf,wsp_can                                & ! PX-LSM  ! UTK-Urban
+     &          ,ht,ifsnow,isfflx                                     &
      &          ,fractional_seaice,seaice_albedo_opt                  &
      &          ,seaice_albedo_default,seaice_thickness_opt,          &
      &          seaice_thickness_default                              &
@@ -40,9 +46,11 @@ CONTAINS
      &          ,mosaic_lu,mosaic_soil                                &
      &          ,landusef,soilctop,soilcbot,ra,rs,nlcat,nscat,vegf_px & ! PX-LSM
      &          ,snowncv, anal_interval, lai, imperv, canfra          & ! PX-LSM
-     &          ,pxlsm_smois_init, pxlsm_soil_nudge                   & ! PX-LSM
-     &          ,pxlsm_modis_veg, lai_px, wwlt_px, wfc_px                           & ! PX-LSM
-     &          ,wsat_px, clay_px, csand_px, fmsand_px                              & ! PX-LSM
+     &          ,pxlsm_smois_init, pxlsm_soil_nudge, swddir, swddif   & ! PX-LSM  ! UTK-Urban
+     &          ,pxlsm_modis_veg, ifuacm, lai_px, wwlt_px, wfc_px     & ! PX-LSM
+     &          ,wsat_px, clay_px, csand_px, fmsand_px                & ! PX-LSM
+     &          ,build_area_fraction, build_height, lamf              & ! P-X LSM ! UTK-Urban
+     &          ,stdir1,stdir2,blkw1,blkw2                            & ! PX UACM
      &          ,idveg    ,iopt_crs  ,iopt_btr  ,iopt_run  ,iopt_sfc  ,iopt_frz     &
      &          ,iopt_inf ,iopt_rad  ,iopt_alb  ,iopt_snf  ,iopt_tbot ,iopt_stc     &
      &          ,iopt_gla ,iopt_rsf  ,iopt_soil ,iopt_pedo ,iopt_crop ,iopt_irr     &
@@ -256,7 +264,7 @@ CONTAINS
              !  Optional adaptive time step
      &          ,bldt,curr_secs,adapt_step_flag,bldtacttime           & 
          ! Optional urban with BEP
-     &          ,sf_urban_physics,gmt,xlat,xlong,julday               &
+     &          ,sf_urban_physics,gmt,xlat,xlong,sina,cosa,julday     &
      &          ,distributed_ahe_opt, ahe                             & !For anthropogenic heat
      &          ,num_urban_ndm                                        & !multi-layer urban
      &          ,urban_map_zrd                                        & !multi-layer urban
@@ -286,8 +294,7 @@ CONTAINS
      &          ,drain_urb4d,draingr_urb3d                           & !multi-layer urban GRZ
      &          ,sfrv_urb3d,lfrv_urb3d                               & !multi-layer urban GRZ
      &          ,dgr_urb3d,dg_urb3d                                   & !multi-layer urb;:an GRZ
-     &          ,lfr_urb3d,lfg_urb3d                                 & !multi-layer urban GRZ
-     &          ,swddir,swddif                                        & !gl
+     &          ,lfr_urb3d,lfg_urb3d                                  & !multi-layer urban GRZ
      &          ,lp_urb2d,hi_urb2d,lb_urb2d,hgt_urb2d                 & !multi-layer urban
      &          ,mh_urb2d,stdh_urb2d,lf_urb2d                         &           
      &          ,lf_urb2d_s, z0_urb2d                                 &
@@ -557,6 +564,7 @@ CONTAINS
 !-- NLCAT        Number of landuse categories          ! P-X LSM
 !-- NSCAT        Number of soil categories             ! P-X LSM
 !-- pxlsm_modis_veg   Flag for using MODIS vegeation LAI and vegF (1 is yes)    ! P-X LSM
+!-- ifuacm            Flag for px urban model
 !-- LAI_PX            Computed LAI for PX (m^2/m^2)                             ! P-X LSM
 !-- WWLT_PX           Computed soil wilting point for PX (m^3/m^3)              ! P-X LSM
 !-- WFC_PX            Computed soil field capacity for PX (m^3/m^3)             ! P-X LSM
@@ -703,6 +711,45 @@ CONTAINS
 
    REAL, DIMENSION( ims:ime, jms:jme ) , INTENT(INOUT)::   GRDFLX
    REAL, DIMENSION( ims:ime, jms:jme ) , INTENT(INOUT)::   HFX
+   REAL, DIMENSION( ims:ime, jms:jme ) , INTENT(INOUT)::   HFX_RF         ! UTK-Urban
+   REAL, DIMENSION( ims:ime, jms:jme ) , INTENT(INOUT)::   HFX_WL         ! UTK-Urban
+   REAL, DIMENSION( ims:ime, jms:jme ) , INTENT(INOUT)::   GAB_WL
+   REAL, DIMENSION( ims:ime, jms:jme ) , INTENT(INOUT)::   GAB_RF
+   REAL, DIMENSION( ims:ime, jms:jme ) , INTENT(INOUT)::   WSP_CAN
+   REAL, DIMENSION( ims:ime, jms:jme ) , INTENT(INOUT)::   ANTHFX1        ! UTK-Urban
+   REAL, DIMENSION( ims:ime, jms:jme ) , INTENT(INOUT)::   ANTHFX_RF      ! UTK-Urban
+   REAL, DIMENSION( ims:ime, jms:jme ) , INTENT(INOUT)::   QFX_RF         ! UTK-Urban
+   REAL, DIMENSION( ims:ime, jms:jme ) , INTENT(INOUT)::   LH_RF          ! UTK-Urban
+   REAL, DIMENSION( ims:ime, jms:jme ) , INTENT(INOUT)::   TG_RF          ! UTK-Urban
+   DOUBLE PRECISION, DIMENSION( ims:ime, jms:jme ) , INTENT(INOUT)::   T2_RF          ! UTK-Urban
+   REAL, DIMENSION( ims:ime, jms:jme ) , INTENT(INOUT)::   TG_WL          ! UTK-Urban
+   DOUBLE PRECISION, DIMENSION( ims:ime, jms:jme ) , INTENT(INOUT)::   T2_WL          ! UTK-Urban
+   DOUBLE PRECISION, DIMENSION( ims:ime, jms:jme ) , INTENT(INOUT)::   T2_GND
+   REAL, DIMENSION( ims:ime, jms:jme ) , INTENT(INOUT)::   RADWL          ! UTK-Urban
+   REAL, DIMENSION( ims:ime, jms:jme ) , INTENT(INOUT)::   RADWL_FNL      ! UTK-Urban
+   REAL, DIMENSION( ims:ime, jms:jme ) , INTENT(INOUT)::   RADST          ! UTK-Urban
+   REAL, DIMENSION( ims:ime, jms:jme ) , INTENT(INOUT)::   RADST_FNL      ! UTK-Urban
+   REAL, DIMENSION( ims:ime, jms:jme ) , INTENT(INOUT)::   GSW_URB        ! UTK-Urban
+   REAL, DIMENSION( ims:ime, jms:jme ) , INTENT(INOUT)::   GSW_WL         ! UTK-Urban
+   REAL, DIMENSION( ims:ime, jms:jme ) , INTENT(INOUT)::   RADNET         ! UTK-Urban
+   REAL, DIMENSION( ims:ime, jms:jme ) , INTENT(INOUT)::   RADNET_URB     ! UTK-Urban
+   REAL, DIMENSION( ims:ime, jms:jme ) , INTENT(INOUT)::   RADNET_RF      ! UTK-Urban
+   REAL, DIMENSION( ims:ime, jms:jme ) , INTENT(INOUT)::   RADNET_WL      ! UTK-Urban
+   REAL, DIMENSION( ims:ime, jms:jme ) , INTENT(INOUT)::   LWDN_URB       ! UTK-Urban
+   REAL, DIMENSION( ims:ime, jms:jme ) , INTENT(INOUT)::   LWDN_RF        ! UTK-Urban
+   REAL, DIMENSION( ims:ime, jms:jme ) , INTENT(INOUT)::   LWDN_WL        ! UTK-Urban
+   REAL, DIMENSION( ims:ime, jms:jme ) , INTENT(INOUT)::   LWUP_URB       ! UTK-Urban
+   REAL, DIMENSION( ims:ime, jms:jme ) , INTENT(INOUT)::   LWUP_RF        ! UTK-Urban
+   REAL, DIMENSION( ims:ime, jms:jme ) , INTENT(INOUT)::   LWUP_WL        ! UTK-Urban
+   REAL, DIMENSION( ims:ime, jms:jme ) , INTENT(INOUT)::   SWDDIR         ! UTK-Urban
+   REAL, DIMENSION( ims:ime, jms:jme ) , INTENT(INOUT)::   SWDDIF         ! UTK-Urban
+   REAL, DIMENSION( ims:ime, jms:jme ) , INTENT(INOUT)::   build_area_fraction 
+   REAL, DIMENSION( ims:ime, jms:jme ) , INTENT(INOUT)::   build_height
+   REAL, DIMENSION( ims:ime, jms:jme ) , INTENT(INOUT)::   lamf
+   INTEGER, DIMENSION( ims:ime, jms:jme ) , INTENT(INOUT)::   stdir1
+   INTEGER, DIMENSION( ims:ime, jms:jme ) , INTENT(INOUT)::   stdir2
+   REAL, DIMENSION( ims:ime, jms:jme ) , INTENT(INOUT)::   blkw1
+   REAL, DIMENSION( ims:ime, jms:jme ) , INTENT(INOUT)::   blkw2
    REAL, DIMENSION( ims:ime, jms:jme ) , INTENT(INOUT)::   RMOL
    REAL, DIMENSION( ims:ime, jms:jme ) , INTENT(INOUT)::   PBLH
    REAL, DIMENSION( ims:ime, jms:jme ) , INTENT(INOUT)::   Q2
@@ -947,7 +994,7 @@ CONTAINS
    INTEGER, OPTIONAL, INTENT(IN  ) ::                               JULDAY
    INTEGER, INTENT(IN) :: distributed_ahe_opt
    REAL, OPTIONAL, DIMENSION( ims:ime, 0:287, jms:jme ), INTENT(IN)  :: ahe
-   REAL, OPTIONAL, DIMENSION( ims:ime, jms:jme ), INTENT(IN   )        ::XLAT, XLONG
+   REAL, OPTIONAL, DIMENSION( ims:ime, jms:jme ), INTENT(IN   )        ::XLAT, XLONG, SINA, COSA
    INTEGER , INTENT(IN)        ::     num_urban_ndm
    INTEGER , INTENT(IN)        ::     urban_map_zrd
    INTEGER , INTENT(IN)        ::     urban_map_zwd
@@ -978,7 +1025,7 @@ CONTAINS
    REAL, OPTIONAL, DIMENSION( ims:ime, jms:jme ), INTENT(INOUT) :: cm_ac_urb3d
    REAL, OPTIONAL, DIMENSION( ims:ime, jms:jme ), INTENT(INOUT) :: sfvent_urb3d
    REAL, OPTIONAL, DIMENSION( ims:ime, jms:jme ), INTENT(INOUT) :: lfvent_urb3d
-   REAL, OPTIONAL, DIMENSION( ims:ime , jms:jme ), INTENT(IN ):: SWDDIR,SWDDIF
+
    REAL, OPTIONAL, DIMENSION( ims:ime, 1:urban_map_wd,  jms:jme ), INTENT(INOUT) :: sfwin1_urb3d
    REAL, OPTIONAL, DIMENSION( ims:ime, 1:urban_map_wd,  jms:jme ), INTENT(INOUT) :: sfwin2_urb3d
    REAL, OPTIONAL, DIMENSION( ims:ime, 1:urban_map_zd,  jms:jme ), INTENT(INOUT) :: sfw1_urb3d
@@ -1064,7 +1111,7 @@ CONTAINS
 !  PX LSM Surface Grid Analysis nudging
 !
    INTEGER, OPTIONAL, INTENT(IN)    :: pxlsm_smois_init, pxlsm_soil_nudge,  &
-                                       ANAL_INTERVAL, pxlsm_modis_veg
+                                       ANAL_INTERVAL, pxlsm_modis_veg, ifuacm
 
    REAL, DIMENSION( ims:ime, NLCAT, jms:jme ) , OPTIONAL, INTENT(INOUT)::   LANDUSEF
    REAL, DIMENSION( ims:ime, NSCAT, jms:jme ) , OPTIONAL, INTENT(INOUT)::   SOILCTOP, SOILCBOT
@@ -3626,25 +3673,35 @@ CONTAINS
              ENDIF
           ENDIF
           CALL wrf_debug(100,'in P-X LSM')
-          CALL PXLSM(u_phy, v_phy, dz8w, qv_curr, t_phy, th_phy, rho,&
-                     psfc, gsw, glw, rainbl, emiss,                  &
-                     ITIMESTEP, curr_secs, num_soil_layers, DT,      &
-                     anal_interval, xland, xice, albbck, albedo,     &
-                     snoalb, smois, tslb, mavail,T2, Q2, qsfc,       &
-                     zs, dzs, psih,                                  &
-                     landusef,soilctop,soilcbot,vegfra, vegf_px,     &
-                     isltyp,ra,rs,lai,imperv,canfra,nlcat,nscat,     &
-                     hfx,qfx,lh,tsk,sst,znt,canwat,                  &
-                     grdflx,shdmin,shdmax,                           &
-                     snowc,pblh,rmol,ust,capg,dtbl,                  &
-                     t2_ndg_old,t2_ndg_new,q2_ndg_old,q2_ndg_new,    &
-                     sn_ndg_old, sn_ndg_new, snow, snowh,snowncv,    &
-                     t2obs, q2obs,pxlsm_smois_init,pxlsm_soil_nudge, &
-                     pxlsm_modis_veg, LAI_PX, WWLT_PX, WFC_PX,       &
-                     WSAT_PX, CLAY_PX, CSAND_PX, FMSAND_PX,          &
-                     ids,ide, jds,jde, kds,kde,                      &
-                     ims,ime, jms,jme, kms,kme,                      &
-                     i_start(ij),i_end(ij), j_start(ij),j_end(ij), kts,kte)
+          CALL PXLSM(u_phy, v_phy, p_phy, dz8w, qv_curr, t_phy, th_phy, rho,   &
+                     psfc, gsw, glw, rainbl, emiss, julian_in, xtime, gmt,     &
+                     ITIMESTEP, curr_secs, num_soil_layers, DT,                &
+                     anal_interval, xland, xice, albbck, albedo,               &
+                     snoalb, smois, tslb, mavail,T2, Q2, qsfc,                 &
+                     zs, dzs, psih,                                            &
+                     landusef, soilctop, soilcbot, vegfra, vegf_px,            &
+                     isltyp, ra, rs, lai, imperv, canfra, nlcat, nscat,        &
+                     hfx, hfx_rf, hfx_wl, anthfx1, anthfx_rf, qfx_rf, lh_rf,   & ! UTK-Urban
+                     tg_rf,t2_rf,tg_wl,t2_wl,t2_gnd,radwl,radwl_fnl,radst,radst_fnl, & ! UTK-Urban 
+                     gsw_urb,gsw_wl, radnet, radnet_urb, radnet_rf, radnet_wl, & ! UTK-Urban
+                     lwdn_urb, lwdn_rf, lwdn_wl, lwup_urb, lwup_rf, lwup_wl,   & ! UTK-Urban 
+                     qfx, lh, tsk, sst, znt, canwat,                           &
+                     grdflx, shdmin, shdmax,                                   &
+                     snowc, pblh, rmol, ust, capg, dtbl,                       &
+                     t2_ndg_old, t2_ndg_new, q2_ndg_old, q2_ndg_new,           &
+                     sn_ndg_old, sn_ndg_new, snow, snowh, snowncv,             &
+                     t2obs, q2obs, pxlsm_smois_init, pxlsm_soil_nudge,         &
+                     coszen, XLAT, XLONG, SINA, COSA,                          &
+                     build_area_fraction, build_height, lamf,                  & ! UTK-Urban
+                     stdir1,stdir2,blkw1,blkw2,                                & ! UACM
+                     swddir, swddif,                                           & ! UTK-Urban
+                     pxlsm_modis_veg, ifuacm, LAI_PX, WWLT_PX, WFC_PX,         &
+                     WSAT_PX, CLAY_PX, CSAND_PX, FMSAND_PX,                    &
+                     GAB_RF, GAB_WL, WSP_CAN,                                  &
+                     ids,ide, jds,jde, kds,kde,                                &
+                     ims,ime, jms,jme, kms,kme,                                &
+                     i_start(ij),i_end(ij), j_start(ij),j_end(ij), kts,kte     )
+
           IF ( FRACTIONAL_SEAICE == 1 ) THEN
              IF ( isisfc ) THEN
                 !

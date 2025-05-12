@@ -106,7 +106,7 @@ NETCDF4_DEP_LIB = CONFIGURE_NETCDF4_DEP_LIB
 
 LIBWRFLIB = libwrflib.a
 
-#NOWIN LIB_BUNDLED     = \
+#NOWIN LIB_BUNDLED     = $(IOAPI_LIB) \
 #NOWIN                      $(WRF_SRC_ROOT_DIR)/external/fftpack/fftpack5/libfftpack.a \
 #NOWIN                      $(WRF_SRC_ROOT_DIR)/external/io_grib1/libio_grib1.a \
 #NOWIN                      $(WRF_SRC_ROOT_DIR)/external/io_grib_share/libio_grib_share.a \

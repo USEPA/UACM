@@ -199,6 +199,7 @@ CONTAINS
               ,chem_opt                                                   &
               ,gsfcrad_gocart_coupling                                    &
 #endif
+              ,inner_domain                                               & ! WRF-CMAQ twoway coupled model
               ,feedback_is_ready                                          & ! WRF-CMAQ twoway coupled model
               ,mass_ws_i                                                  & ! WRF-CMAQ twoway coupled model
               ,mass_ws_j                                                  & ! WRF-CMAQ twoway coupled model
@@ -906,6 +907,7 @@ CONTAINS
          INTENT(INOUT)  ::                       o3rad
 
    ! begin WRF-CMAQ coupled model block
+   LOGICAL, OPTIONAL :: inner_domain
    REAL, DIMENSION (ims:ime, kms:kme, jms:jme ), optional,       &
          INTENT(INOUT)  ::  mass_ws_i, mass_ws_j, mass_ws_k,     &
                             mass_in_i, mass_in_j, mass_in_k,     &
@@ -1027,13 +1029,21 @@ CONTAINS
    LOGICAL :: proceed_cmaq_sw
 
    logical, save :: firstime = .true.
+   logical, save :: feedback_restart_saved, direct_sw_feedback_saved
    logical, save :: feedback_restart, direct_sw_feedback
 
 #if ( WRF_CMAQ == 1 )
    if (firstime) then
       firstime = .false.
-      CALL nl_get_direct_sw_feedback ( .false. , direct_sw_feedback )
-      CALL nl_get_feedback_restart   ( .false. , feedback_restart )
+      CALL nl_get_direct_sw_feedback ( .false. , direct_sw_feedback_saved )
+      CALL nl_get_feedback_restart   ( .false. , feedback_restart_saved )
+   end if
+   if (inner_domain) then
+      direct_sw_feedback = direct_sw_feedback_saved
+      feedback_restart   = feedback_restart_saved
+   else
+      direct_sw_feedback = .false.
+      feedback_restart   = .false.
    end if
 #else
    direct_sw_feedback = .false.
@@ -2534,7 +2544,7 @@ CONTAINS
 
              CALL wrf_debug(100, 'CALL rrtmg_sw')
 
-             if ( direct_sw_feedback .and. feedback_is_ready ) then
+             if ( direct_sw_feedback .and. feedback_is_ready .and. inner_domain) then
                 proceed_cmaq_sw = .true.
 
                 if (present(mass_ws_i)) then

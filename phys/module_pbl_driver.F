@@ -149,8 +149,14 @@ CONTAINS
 !
 ! END FASDAS
 !
-                                                                     )
-       
+! -- for ACM2 PBL, DDY urban (01/2016)
+               ,nlcat,landusef                                       &
+               ,cosz,swdown,ifuacm                                   &
+               ,hfx_rf,hfx_wl,qfx_rf                                 &
+               ,build_area_fraction, build_height, lamf              &
+               ,stdir1,stdir2,blkw1,blkw2                            &
+               ,UST_WL,UST_RF,UST_ST                                 )  ! ACM2-PBL   ! UTK-Urban
+ 
 !------------------------------------------------------------------
 #if (EM_CORE==1)
    USE module_state_description, ONLY :                            &
@@ -784,6 +790,17 @@ CONTAINS
     LOGICAL, INTENT(IN) :: mynn_chem_vertmx
 #endif
 
+!   ACM2 DDY urban (01/2016)
+    INTEGER, INTENT (IN) :: nlcat
+    REAL, INTENT (IN), DIMENSION(ims:ime, 1:nlcat, jms:jme)  :: LANDUSEF
+    REAL, INTENT (IN), DIMENSION(ims:ime, jms:jme)           :: COSZ, SWDOWN
+    REAL, INTENT (IN), DIMENSION(ims:ime, jms:jme)           :: HFX_RF, HFX_WL, QFX_RF   ! UTK-Urban
+    REAL, INTENT (IN), DIMENSION(ims:ime, jms:jme)           :: build_area_fraction, build_height, lamf
+    INTEGER, INTENT (IN), DIMENSION(ims:ime, jms:jme)        :: stdir1,stdir2
+    REAL, INTENT (IN), DIMENSION(ims:ime, jms:jme)           :: blkw1,blkw2 
+    REAL, INTENT (OUT), DIMENSION(ims:ime, kms:kme, jms:jme ):: UST_WL
+    REAL, INTENT (OUT), DIMENSION(ims:ime, jms:jme)          :: UST_RF,UST_ST
+    INTEGER, INTENT(IN   )                                   :: IFUACM
 !  LOCAL  VAR
 
    REAL,       DIMENSION( ims:ime, kms:kme, jms:jme ) ::v_phytmp
@@ -1603,6 +1620,13 @@ CONTAINS
               ,GZ1OZ0=gz1oz0,WSPD=wspd,PSIM=psim, MUT=mut, RMOL=rmol             &
               ,RUBLTEN=rublten,RVBLTEN=rvblten,RTHBLTEN=rthblten                 &
               ,RQVBLTEN=rqvblten,RQCBLTEN=rqcblten,RQIBLTEN=rqiblten             &
+!-- DDY urban (01/2016)
+              ,NLCAT=nlcat, LANDUSEF=landusef                                    &
+              ,COSZ=cosz, SWDOWN=swdown, IFUACM=ifuacm                           &
+              ,HFX_RF=hfx_rf, HFX_WL=hfx_wl, QFX_RF=qfx_rf                       &   ! UTK-Urban
+              ,LAMP=build_area_fraction, BUILD_HEIGHT=build_height, LAMF=lamf    &   ! UTK-Urban
+              ,STDIR1=stdir1, STDIR2=stdir2, BLKW1=blkw1, BLKW2=blkw2            &
+              ,UST_WL=UST_WL, UST_RF=UST_RF, UST_ST=UST_ST                       &
               ,IDS=ids,IDE=ide,JDS=jds,JDE=jde,KDS=kds,KDE=kde                   &
               ,IMS=ims,IME=ime,JMS=jms,JME=jme,KMS=kms,KME=kme                   &
               ,ITS=its,ITE=ite,JTS=jts,JTE=jte,KTS=kts,KTE=kte                   &   

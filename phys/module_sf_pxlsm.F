@@ -3,50 +3,63 @@ MODULE module_sf_pxlsm
   USE module_model_constants
   USE module_sf_pxlsm_data
 
-  INTEGER, PARAMETER   :: NSOLD=20
-  REAL, PARAMETER      :: RD     = 287.04,   CPD   = 1004.67,             &
-                          CPH2O  = 4.218E+3, CPICE = 2.106E+3,            &
-                          LSUBF  = 3.335E+5, SIGMA = 5.67E-8,             &  
-                          ROVCP  = RD / CPD
+  INTEGER, PARAMETER   :: NSOLD   = 20
+  REAL, PARAMETER      :: RD      = 287.04,   CPD   = 1004.67,             &
+                          CPH2O   = 4.218E+3, CPICE = 2.106E+3,            &
+                          LSUBF   = 3.335E+5, SIGMA = 5.67E-8,             &  
+                          ROVCP   = RD / CPD
                           
-  REAL, PARAMETER      :: CRANKP = 0.5                    ! CRANK-NIC PARAMETER
-  REAL, PARAMETER      :: RIC    = 0.25                   ! critical Richardson number
-  REAL, PARAMETER      :: DENW   = 1000.0                 ! water density in KG/M3                  
-  REAL, PARAMETER      :: TAUINV = 1.0 / 86400.0          ! 1/1DAY(SEC)
-  REAL, PARAMETER      :: T2TFAC = 1.0 / 10.0             ! Bottom soil temp response factor
-  REAL, PARAMETER      :: PI = 3.1415926
-  REAL, PARAMETER      :: PR0 = 0.95
-  REAL, PARAMETER      :: CZO    = 0.032
-  REAL, PARAMETER      :: OZO    = 1.E-4
+  DOUBLE PRECISION, PARAMETER      :: CRANKP  = 0.5                    ! CRANK-NIC PARAMETER
+  REAL, PARAMETER      :: RIC     = 0.25                   ! critical Richardson number
+  REAL, PARAMETER      :: DENW    = 1000.0                 ! water density in KG/M3                  
+  DOUBLE PRECISION, PARAMETER      :: TAUINV  = 1.0 / 86400.0          ! 1/1DAY(SEC)
+  DOUBLE PRECISION, PARAMETER      :: T2TFAC  = 1.0 / 10.0             ! Bottom soil temp response factor
+  DOUBLE PRECISION, PARAMETER      :: T2TFACU = 1.0 / 4.0              ! Bottom layer temp response factor (for UTK Urban)
+  REAL, PARAMETER      :: PI      = 3.1415926535897932384626433 ! same as piconst in module_model_constants.F
+  REAL, PARAMETER      :: RADDEG  = 180.0/PI               ! degrees per radian
+  REAL, PARAMETER      :: PR0     = 0.95
+  REAL, PARAMETER      :: CZO     = 0.032
+  REAL, PARAMETER      :: OZO     = 1.E-4
 
 CONTAINS
 !
 
 !-------------------------------------------------------------------------
 !-------------------------------------------------------------------------
-   SUBROUTINE pxlsm(U3D, V3D, DZ8W, QV3D,T3D,TH3D, RHO,         &   
-                    PSFC, GSW, GLW, RAINBL, EMISS,              &
-                    ITIMESTEP,CURR_SECS,NSOIL,DT,ANAL_INTERVAL, &            
-                    XLAND, XICE, ALBBCK, ALBEDO,                &
-                    SNOALB, SMOIS, TSLB, MAVAIL, TA2,           &
-                    QA2, QSFC, ZS,DZS, PSIH,                          &
-                    LANDUSEF,SOILCTOP,SOILCBOT,VEGFRA,VEGF_PX,  &
-                    ISLTYP,RA,RS,LAI,IMPERV,CANFRA,NLCAT,NSCAT, & 
-                    HFX,QFX,LH,TSK,SST,ZNT,CANWAT,              &
-                    GRDFLX,SHDMIN,SHDMAX,                       &
-                    SNOWC,PBLH,RMOL,UST,CAPG,DTBL,              &
-                    T2_NDG_OLD, T2_NDG_NEW,                     &     
-                    Q2_NDG_OLD, Q2_NDG_NEW,                     & 
-                    SN_NDG_OLD, SN_NDG_NEW, SNOW, SNOWH,SNOWNCV,&
-                    T2OBS, Q2OBS, PXLSM_SMOIS_INIT,             &           
-                    PXLSM_SOIL_NUDGE,                           &
-                    pxlsm_modis_veg,                            &
-                    LAI_PX,                                     &
-                    WWLT_PX, WFC_PX, WSAT_PX,                   &
-                    CLAY_PX, CSAND_PX, FMSAND_PX,               &
-                    ids,ide, jds,jde, kds,kde,                  &
-                    ims,ime, jms,jme, kms,kme,                  &
-                    its,ite, jts,jte, kts,kte                    )
+   SUBROUTINE pxlsm(U3D, V3D, PP3D, DZ8W, QV3D, T3D, TH3D, RHO,          &
+                    PSFC, GSW, GLW, RAINBL, EMISS, JULIAN, XTIME, GMT,   &
+                    ITIMESTEP, CURR_SECS, NSOIL, DT, ANAL_INTERVAL,      &
+                    XLAND, XICE, ALBBCK, ALBEDO,                         &
+                    SNOALB, SMOIS, TSLB, MAVAIL, TA2,                    &
+                    QA2, QSFC, ZS, DZS, PSIH,                            &
+                    LANDUSEF, SOILCTOP, SOILCBOT, VEGFRA, VEGF_PX,       &
+                    ISLTYP, RA, RS, LAI, IMPERV, CANFRA, NLCAT, NSCAT,   &
+                    HFX, HFX_RF, HFX_WL, ANTHFX1, ANTHFX_RF, QFX_RF,     &   !-- UTK Urban
+                    LH_RF, TG_RF, T2_RF, TG_WL, T2_WL, T2_GND,           &   !-- UTK Urban
+                    RADWL, RADWL_FNL, RADST, RADST_FNL, GSW_URB, GSW_WL, &   !-- UTK Urban
+                    RADNET, RADNET_URB, RADNET_RF, RADNET_WL,            &   !-- UTK Urban
+                    LWDN_URB, LWDN_RF, LWDN_WL,                          &   !-- UTK Urban 
+                    LWUP_URB, LWUP_RF, LWUP_WL,                          &   !-- UTK Urban
+                    QFX, LH, TSK, SST, ZNT, CANWAT,                      &
+                    GRDFLX, SHDMIN, SHDMAX,                              &
+                    SNOWC, PBLH, RMOL, UST, CAPG, DTBL,                  &
+                    T2_NDG_OLD, T2_NDG_NEW,                              &
+                    Q2_NDG_OLD, Q2_NDG_NEW,                              &
+                    SN_NDG_OLD, SN_NDG_NEW, SNOW, SNOWH, SNOWNCV,        &
+                    T2OBS, Q2OBS, PXLSM_SMOIS_INIT,                      &
+                    PXLSM_SOIL_NUDGE,                                    &
+                    cosz, XLAT, XLONG, SINA, COSA,                       &   !-- DDY Urban
+                    LAMP, HGTBDG, lamf,                                  &
+                    STDIR1,STDIR2,BLKW1,BLKW2,                           &
+                    SWDDIR, SWDDIF,                                      &   !-- UTK Urban
+                    pxlsm_modis_veg, ifuacm,                             &
+                    LAI_PX,                                              &
+                    WWLT_PX, WFC_PX, WSAT_PX,                            &
+                    CLAY_PX, CSAND_PX, FMSAND_PX,                        &
+                    GAB_RF, GAB_WL, WSP_CAN,                             &
+                    ids,ide, jds,jde, kds,kde,                           &
+                    ims,ime, jms,jme, kms,kme,                           &
+                    its,ite, jts,jte, kts,kte                            )
 
 !-------------------------------------------------------------------------
 !   THIS MODULE CONTAINS THE PLEIM-XIU LAND-SURFACE MODEL (PX-LSM).
@@ -57,7 +70,7 @@ CONTAINS
 !   PROGNOSTIC EQUATIONS FOR SOIL MOISTURE AND SOIL TEMPERATURE IN TWO
 !   LAYERS (1 CM AND 1 M) AS WELL AS CANOPY WATER CONTENT.  SURFACE
 !   MOISTURE FLUXES ARE MODELED BY 3 PATHWAYS: SOIL EVAPORATION, CANOPY
-!   EVAPORATION, AND VEGETATIVE EVAPOTRANSPIRRATION.
+!   EVAPORATION, AND VEGETATIVE EVAPOTRANSPIRATION.
 !   EVAPOTRANSPIRATION DIRECTLY FROM THE ROOT ZONE SOIL LAYER IS MODELED
 !   VIA A CANOPY RESISTANCE ANALOG ALGORITHM WHERE STOMATAL CONDUCTANCE
 !   IS CONTROLLED BY SOLAR RADIATION, AIR TEMPERATURE, AIR HUMIDITY, AND
@@ -117,19 +130,21 @@ CONTAINS
 !                    - Impervious surface and canopy fraction data can be used if processed (otherwise 0% so no impact)
 !                      to alter surface heat capacity (See SURFPX subroutine for details) in urban areas and refine
 !                      LAI and VEGF_PX estimations (see VEGLAND subroutine).
-!
 !     JP     12/2015 - Surface water vapor mixing ratio calculation added for land surface, which is passed to PX-SFCLAY 
 !                      for use over all non-water and non-frozen surfaces.
 !                    - PAR function and impact on transpiration modified according to Echer et al.(2015). See P-X LSM documentation
 !                      for full reference. These act to reduce moisture bias near surface during PBL transition.
-!
-!    JP     11/2017 -  Updated vegetation table for different land cover types. Added in WRFv4.0.
-!
-!    LR     11/2017 -  Update for MODIS vegetation: many changes in soil properties. Added in WRFv4.1. 
+!     JP     11/2017 - Updated vegetation table for different land cover types. Added in WRFv4.0.
+!     LR     11/2017 - Update for MODIS vegetation: many changes in soil properties. Added in WRFv4.1. 
 !                      (Ran et al., 2016 JGR-atmosphere, Ran et al. 2017 in preparation)
-!    JP     12/2018 -  revised soil type categories (ISTI) to conform to WRF soil type input data 
+!     JP     12/2018 - revised soil type categories (ISTI) to conform to WRF soil type input data 
 !                      soil types Sand through Clay are now 1-12 rather than 1-11
-!    JP     12/2021 -  Added new pathway for evaporation from the ground in the vegetated fraction of the grid cell.  
+!     JP     12/2021 - Added new pathway for evaporation from the ground in the vegetated fraction of the grid cell.  
+!     UTK    05/2018 - Estimation of urban ground+rooftop temperature and heat fluxes. 
+!                    - Estimation of evaporation rate from the urban surfaces and corresponding moisture fluxes during the precipitation events.
+!                    - Estimation of anthropogenic heat fluxes from the building based upon heating degree days and cooling degree days.
+!     UTK    03/2021 - Incorporation of the complete urban solar radiation model based upon Masson (2000).  
+!                    - Estimation of the urban wall surface temperatures and heat fluxes.
 !
 !--------------------------------------------------------------------------------------------------------------
 !--------------------------------------------------------------------------------------------------------------
@@ -138,8 +153,9 @@ CONTAINS
 !... Inputs:
 !-- U3D          3D u-velocity interpolated to theta points (m/s)
 !-- V3D          3D v-velocity interpolated to theta points (m/s)
+!-- PP3D         Pressure at half levels (Pa)
 !-- DZ8W         dz between full levels (m)
-!-- QV3D	       3D mixing ratio
+!-- QV3D	 3D mixing ratio
 !-- T3D          Temperature (K)
 !-- TH3D         Theta (K)
 !-- RHO          3D dry air density (kg/m^3)
@@ -187,7 +203,7 @@ CONTAINS
 !-- RA           Aerodynamic resistence			
 !-- RS           Stomatal resistence			
 !-- LAI          read in Leaf area index (weighted according to fractional landuse)
-!-- ZNT          rougness length
+!-- ZNT          roughness length
 !-- QSFC         Sat. water vapor mixing ratio at the surface interface
 
 !-- IMPERV       Fraction (percent) of grid cell that is impervious surface (concrete/road/non-veg)
@@ -232,6 +248,7 @@ CONTAINS
 !-- PXLSM_SOIL_NUDGE  Flag to use soil moisture and temperature nudging in the PX LSM
 !                     This is typically done for the first simulation.
 !-- pxlsm_modis_veg   Use MODIS vegetation option: 1 yes, 0 no
+!-- ifuacm            Use Urban PX if 1, 0 no
 !-- LAI_PX            LAI used for PX (m^2/m^2)
 !-- WWLT_PX           Computed soil wilting point for PX (m^3/m^3)
 !-- WFC_PX            Computed soil field capacity for PX (m^3/m^3)
@@ -262,104 +279,148 @@ CONTAINS
 
 !.......Arguments
 ! DECLARATIONS - INTEGER
-    INTEGER,  INTENT(IN)   ::      ids,ide, jds,jde, kds,kde, &
-                                   ims,ime, jms,jme, kms,kme, &
-                                   its,ite, jts,jte, kts,kte 
+   INTEGER, INTENT(IN)        :: ids,ide, jds,jde, kds,kde, &
+                                 ims,ime, jms,jme, kms,kme, &
+                                 its,ite, jts,jte, kts,kte 
 
-   INTEGER,   INTENT(IN)  ::      NSOIL, ITIMESTEP, NLCAT, NSCAT,             &
-                                  ANAL_INTERVAL, PXLSM_SMOIS_INIT, PXLSM_SOIL_NUDGE
+   INTEGER, INTENT(IN)        :: NSOIL, ITIMESTEP, NLCAT, NSCAT,             &
+                                 ANAL_INTERVAL, PXLSM_SMOIS_INIT, PXLSM_SOIL_NUDGE
 
-   REAL,      INTENT(IN   ),OPTIONAL    ::     curr_secs
-
-   REAL,     INTENT(IN )  ::      DT,DTBL 
-
-   INTEGER,   DIMENSION( ims:ime, jms:jme ), INTENT(INOUT) ::   ISLTYP
+   INTEGER, DIMENSION( ims:ime, jms:jme ), INTENT(INOUT)       :: ISLTYP
 
 ! DECLARATIONS - REAL
-    REAL,    DIMENSION( ims:ime, kms:kme, jms:jme ),  INTENT(IN) :: U3D, V3D, RHO, &
-                                                                    T3D, TH3D, DZ8W, QV3D           
+   REAL, INTENT(IN), OPTIONAL :: CURR_SECS
 
-   REAL,     DIMENSION(1:NSOIL), INTENT(IN)::ZS,DZS
-   REAL,     DIMENSION( ims:ime , 1:NSOIL, jms:jme ),  INTENT(INOUT)   ::  SMOIS, TSLB     
+   REAL, INTENT(IN)           :: DT, DTBL 
 
-   REAL,     DIMENSION( ims:ime , jms:jme ), INTENT(INOUT):: RA, RS, LAI, ZNT, QSFC
-   REAL,     DIMENSION( ims:ime , jms:jme ), INTENT(OUT):: GRDFLX, TSK, TA2, QA2
+   REAL, INTENT(IN), OPTIONAL :: JULIAN, XTIME, GMT
 
-   REAL,     DIMENSION( ims:ime , 1:NLCAT, jms:jme ), INTENT(IN):: LANDUSEF       
-   REAL,     DIMENSION( ims:ime , 1:NSCAT, jms:jme ), INTENT(IN):: SOILCTOP, SOILCBOT
+   REAL, OPTIONAL, DIMENSION( ims:ime, jms:jme ), INTENT(IN)   :: XLAT, XLONG, SINA, COSA
 
+   REAL, DIMENSION( ims:ime, kms:kme, jms:jme ), INTENT(IN)    :: U3D, V3D, PP3D, RHO, &
+                                                                  T3D, TH3D, DZ8W, QV3D           
 
-   REAL,    DIMENSION( ims:ime, jms:jme ),                                     &
-            INTENT(IN) ::                            PSFC, GSW, GLW, RAINBL,   &                
-                                                     ALBBCK, SHDMIN, SHDMAX,   &
-                                                     PBLH, RMOL, SNOWNCV,      &
-                                                     UST, MAVAIL, SST, EMISS
+   REAL, DIMENSION(1:NSOIL), INTENT(IN)                        :: ZS, DZS
+   REAL, DIMENSION( ims:ime, 1:NSOIL, jms:jme ), INTENT(INOUT) :: SMOIS, TSLB     
+
+   REAL, DIMENSION( ims:ime, jms:jme ), INTENT(INOUT)          :: RA, RS, LAI, ZNT, QSFC
+   REAL, DIMENSION( ims:ime, jms:jme ), INTENT(OUT)            :: GRDFLX, TSK, TA2, QA2
+
+   REAL, DIMENSION( ims:ime, 1:NLCAT, jms:jme ), INTENT(IN)    :: LANDUSEF       
+   REAL, DIMENSION( ims:ime, 1:NSCAT, jms:jme ), INTENT(IN)    :: SOILCTOP, SOILCBOT
+
+   REAL, DIMENSION( ims:ime, jms:jme ), INTENT(IN)    :: PSFC, GSW, GLW, RAINBL, &                
+                                                         ALBBCK, SHDMIN, SHDMAX, &
+                                                         PBLH, RMOL, SNOWNCV,    &
+                                                         UST, MAVAIL, SST, EMISS
                                                       
-   REAL,    DIMENSION( ims:ime, jms:jme ),                                     &
-            INTENT(IN) ::                            T2_NDG_OLD, T2_NDG_NEW,   &                
-                                                     Q2_NDG_OLD, Q2_NDG_NEW,   & 
-                                                     SN_NDG_OLD, SN_NDG_NEW   
+   REAL, DIMENSION( ims:ime, jms:jme ), INTENT(IN)    :: T2_NDG_OLD, T2_NDG_NEW, &                
+                                                         Q2_NDG_OLD, Q2_NDG_NEW, & 
+                                                         SN_NDG_OLD, SN_NDG_NEW   
 
-   REAL,    DIMENSION( ims:ime, jms:jme ), INTENT(OUT) :: T2OBS, Q2OBS                
+   REAL, DIMENSION( ims:ime, jms:jme ), INTENT(OUT)   :: T2OBS, Q2OBS                
                                                      
-   REAL,    DIMENSION( ims:ime, jms:jme ),                                     &
-            INTENT(INOUT) ::           CAPG,CANWAT, QFX, HFX, LH,              &
-                                       PSIH,VEGFRA, VEGF_PX, SNOW, SNOALB,     &
-                                       SNOWH, SNOWC, ALBEDO, XLAND, XICE,      &
-                                       IMPERV, CANFRA
+   REAL, DIMENSION( ims:ime, jms:jme ), INTENT(INOUT) :: CAPG, CANWAT, QFX, HFX, LH, HFX_RF, HFX_WL, &
+                                                         PSIH,VEGFRA, VEGF_PX, SNOW, SNOALB,         &
+                                                         SNOWH, SNOWC, ALBEDO, XLAND, XICE,          &
+                                                         IMPERV, CANFRA, QFX_RF, LH_RF, ANTHFX1, ANTHFX_RF
 
-   INTEGER, OPTIONAL, INTENT(IN)  :: pxlsm_modis_veg
+   REAL, DIMENSION( ims:ime, jms:jme ), INTENT(IN)    :: SWDDIR, SWDDIF
 
-   REAL,    DIMENSION( ims:ime,  jms:jme ),                                    &
-            OPTIONAL, INTENT(OUT)  :: LAI_PX, WWLT_PX, WFC_PX, WSAT_PX,        &
-                                      CLAY_PX, CSAND_PX, FMSAND_PX
+ !-- DDY and UTK Urban
+   REAL, DIMENSION( ims:ime, jms:jme ), INTENT(IN)    :: COSZ
+   REAL, DIMENSION( ims:ime, jms:jme ), INTENT(INOUT) :: HGTBDG, LAMP, LAMF
+   INTEGER, DIMENSION( ims:ime, jms:jme ), INTENT(INOUT) :: STDIR1, STDIR2
+   REAL, DIMENSION( ims:ime, jms:jme ), INTENT(INOUT)    :: BLKW1, BLKW2
+   REAL, DIMENSION( ims:ime, jms:jme ), INTENT(INOUT) :: TG_RF, RADST, RADST_FNL, GSW_URB
+   REAL, DIMENSION( ims:ime, jms:jme ), INTENT(INOUT) :: TG_WL, RADWL, RADWL_FNL, GSW_WL
+   DOUBLE PRECISION,  DIMENSION( ims:ime, jms:jme ), INTENT(INOUT) ::T2_RF,T2_WL,T2_GND
+   REAL, DIMENSION( ims:ime, jms:jme ), INTENT(INOUT) :: RADNET, RADNET_URB, RADNET_RF, RADNET_WL,   &
+                                                         LWDN_URB, LWDN_RF, LWDN_WL,                 &
+                                                         LWUP_URB, LWUP_RF, LWUP_WL
+
+   INTEGER, OPTIONAL, INTENT(IN) :: pxlsm_modis_veg, ifuacm
+
+   REAL, DIMENSION( ims:ime, jms:jme ), OPTIONAL, INTENT(OUT) :: LAI_PX, WWLT_PX, WFC_PX, WSAT_PX,   &
+                                                                 CLAY_PX, CSAND_PX, FMSAND_PX
    INTEGER  ::  KWAT
 
    LOGICAL :: radiation
 
+   REAL, DIMENSION( ims:ime, jms:jme ), INTENT(OUT)   :: GAB_RF, GAB_WL, WSP_CAN
 !-------------------------------------------------------------------------
 !     ---------- Local Variables --------------------------------
 
 
       !----  PARAMETERS
-      INTEGER, PARAMETER  :: NSTPS  = 11     ! max. soil types
-      REAL, PARAMETER     :: DTPBLX = 40.0   ! Max PX timestep = 40 sec
-
+      INTEGER, PARAMETER :: NSTPS  = 11       ! max. soil types
+      REAL, PARAMETER    :: DTPBLX = 40.0     ! Max PX timestep = 40 sec
+      REAL, PARAMETER    :: EP1 = 0.6083624   ! Constant for Virtual Temperature
       
       !----  INTEGERS
       INTEGER, DIMENSION( 1: NSTPS ) :: JP
-      INTEGER:: J, I, NS, NUDGE, ISTI, WEIGHT
-      INTEGER:: NTSPS, IT
+      INTEGER :: J, I, NS, NUDGE, ISTI, WEIGHT, K, CNP
+      INTEGER :: NTSPS, IT
 
       !----  REALS
-      REAL,     DIMENSION( ims:ime, jms:jme ) :: XLAI, XLAIMN, RSTMIN, &
-                                                 XVEG, XVEGMN, XSNUP, &
-                                                 XALB, XSNOALB, WETFRA
+      REAL, DIMENSION( ims:ime, jms:jme ) :: XLAI, XLAIMN, RSTMIN, &
+                                             XVEG, XVEGMN, XSNUP,  &
+                                             XALB, XSNOALB, WETFRA
                                                   
-      REAL,     DIMENSION( ims:ime, jms:jme ) :: RADNET, EG, ER, ETR, QST
+      REAL, DIMENSION( ims:ime, jms:jme ) :: EG, ER, ETR, QST
 
-      REAL:: SFCPRS,TA1,DENS1,QV1,ZLVL,SOLDN,LWDN,    &
-            EMISSI,PRECIP,THETA1,VAPPRS,QSBT,         &
-            WG,W2,WR,TG,T2,USTAR,MOLX,Z0,             &
-            RAIR,CPAIR,IFLAND,ISNOW,                  &
-            ES,QSS,BETAP,                             &
-            RH2_OLD, RH2_NEW, T2_OLD, T2_NEW,         &
-            CORE, CORB, TIME_BETWEEN_ANALYSIS,        &
-            G1000, ALN10,RH2OBS, HU, SNOBS,           &
-            FWSAT,FWFC,FWWLT,FB,FCGSAT,FJP,FAS,       &
-            FWRES, FC3, FCLAY, FCSAND, FFMSAND,       &  
-            FSEAS, T2I, HC_SNOW, SNOW_FRA,SNOWALB,    &
-            QST12,ZFUNC,ZF1,ZA2,QV2, DT_FDDA,         &
-            FC2R,FC1SAT, DTPBL, RAW
-
+      REAL :: SFCPRS, TA1, DENS1, DENSRF, QV1, ZLVL, SOLDN, LWDN,      &
+              EMISSI, PRECIP, THETA1, VAPPRS, QSBT,                    &
+              WG, W2, WR, TG, T2, USTAR, MOLX, Z0,                     &
+              RAIR, CPAIR, CPAIR_RF, IFLAND, ISNOW,                    &
+              ES, QSS, BETAP,                                          &
+              RH2_OLD, RH2_NEW, T2_OLD, T2_NEW,                        &
+              CORE, CORB, TIME_BETWEEN_ANALYSIS,                       &
+              G1000, ALN10, RH2OBS, HU, SNOBS,                         &
+              FWSAT, FWFC, FWWLT, FB, FCGSAT, FJP, FAS,                &
+              FWRES, FC3, FCLAY, FCSAND, FFMSAND,                      &  
+              FSEAS, T2I, HC_SNOW, SNOW_FRA, SNOWALB,                  &
+              QST12, ZFUNC, ZF1, ZA2, QV2, DT_FDDA,                    &
+              FC2R, FC1SAT, DTPBL, RAW, QSS_RF, QV_RF, QV_RF1, TA_RF,  &  !-- UTK
+              THETA_RF, THETAV_RF, THETA_RF1, THETAV_RF1, DZFRF, TA_CAN, &
+              THETA_RFs, THETAV_RFs, THETA_WLs, DENS_CAN, THETA_CAN,   &
+              US_CAN, VS_CAN, QV_CAN, PP_CAN, CPAIR_CAN
 
       CHARACTER (LEN = 6) :: LAND_USE_TYPE
 
+      !-- DDY and UTK Urban
+      REAL, DIMENSION( its:ite, jts:jte )    :: URBF2D
+      REAL, DIMENSION( ims:ime, jms:jme )    :: PPLN_FNL, VEGU_FNL
+
+      REAL, DIMENSION( 0:kte )               :: ZF
+      REAL, DIMENSION( kts:kte )             :: ZA, DZF
+      INTEGER, DIMENSION( its:ite, jts:jte ) :: KSL
+
+      REAL :: WR_ST, WR_VEG, WR_RF, US_RF1, US_RF, VS_RF1, VS_RF, PP_RF 
+      REAL :: ZF_CNP1, ZF_CNP0, ZA_CNP2, ZA_CNP1, BB1, BB2
+      REAL :: LCZtot,sumhb,sumlp,sumbk1,sumbk2
+      INTEGER lcat,lcatm40 
+      REAL, DIMENSION( its:ite, jts:jte ) :: ER_ST, ER_RF 
+      REAL, SAVE :: STWAT(1:350,1:400), RFWAT(1:350,1:400)        ! *IMPORTANT NOTE* :- Make sure the domain of interest fits
+                                                                  !                     well within the dimensions defined here 
+      LOGICAL, SAVE :: FIRSTIME(1:350,1:400) = .TRUE.  
+      LOGICAL, SAVE :: FIRSTIME_TG(1:350,1:400) = .TRUE.
+
+      LOGICAL :: ISPXURB,LCZRUN
+
+      REAL, DIMENSION(11) :: HB_LCZ, LAMP_LCZ, BLKW1_LCZ,BLKW2_LCZ, WSTT_LCZ
+
+      DATA HB_LCZ /60., 30., 10., 30., 15., 10., 3., 10., 8.5, 10.,10./
+      DATA LAMP_LCZ /0.40,0.33,0.30,0.17,0.20,0.10,0.10,0.20,0.08,0.25,0.25/
+      DATA BLKW1_LCZ/70.,70.,80.,100.,80.,60.,60.,60.,60.,100.,100./
+      DATA BLKW2_LCZ/180.,180.,200.,200.,200.,200.,100.,100.,100.,100.,100./
+      DATA WSTT_LCZ/25.,20.,20.,20.,20.,20.,20.,20.,20.,20.,20./
 !-------------------------------------------------------------------------
 !-------------------------------Executable starts here--------------------
 !
+
       ALN10  = ALOG(10.0)
-      G1000  = g*1.0E-3            ! G/1000
+      G1000  = g * 1.0E-3          ! G/1000
       WEIGHT = 0
       ! Determine Landuse Dataset by the number of categories
       IF (NLCAT == 50) THEN
@@ -376,6 +437,8 @@ CONTAINS
          LAND_USE_TYPE = 'USGS'
       ELSE IF (NLCAT == 28) THEN
          LAND_USE_TYPE = 'USGS28'
+      ELSE IF (NLCAT == 51) THEN
+         LAND_USE_TYPE = 'NLCD51'
       ELSE
          call wrf_error_fatal("Error: Unknown Land Use Category")
       END IF 
@@ -407,6 +470,19 @@ CONTAINS
           CORB = 1.0 - CORE
         ENDIF 
       ENDIF 
+
+      !-------------------------------------------------------------
+      !-- LSM sub-time loop too prevent dt > 40 sec
+          NTSPS = INT(DT / (DTPBLX + 0.000001) + 1.0)
+          DTPBL = DT / NTSPS
+
+      !---------------------------------------------------------------------------------------
+      !-- Condition to set the variable 'ISPXURB' for the domain of interest 
+      !-- Urban model set for each domain according to namelist parameter ifuacm
+
+        ISPXURB = .FALSE.
+      IF (ifuacm.eq.1) ISPXURB = .TRUE.     
+
       !-----------------------------------------------------------------------------------
       ! Compute vegetation and land-use characteristics by land-use fraction weighting
       ! These parameters include LAI, VEGF, ZNT, ALBEDO, SNOALB, RS, etc.
@@ -414,17 +490,30 @@ CONTAINS
                     SOILCTOP, SOILCBOT, NLCAT, NSCAT,         &
                     ZNT,XLAI,XLAIMN,RSTMIN,XVEG,XVEGMN,XSNUP, &
                     XLAND, XALB,XSNOALB,WETFRA,IMPERV,CANFRA, &
+                    URBF2D,ISPXURB,                           & !DDY, UTK Urban
                     ids,ide, jds,jde, kds,kde,                &
                     ims,ime, jms,jme, kms,kme,                &
                     its,ite, jts,jte, kts,kte, LAND_USE_TYPE, &
                     KWAT )
       !-----------------------------------------------------------------------------------
-      
-
       !-----------------------------------------------------------------------------------
       ! Main loop over individual grid cells
-      DO J = jts,jte    !-- J LOOP
-       DO I = its,ite   !-- I LOOP
+      DO J = jts, jte    !-- J LOOP
+        DO I = its, ite  !-- I LOOP
+
+          !-- Estimation of height of full Model levels above ground level
+
+          DO K = kts, kte
+            DZF(K) = DZ8W(I,K,J)              
+          ENDDO
+          ZF(0) = 0.0
+
+
+          DO K = kts, kte
+            ZF(K) = DZF(K) + ZF(K-1)
+            ZA(K) = 0.5 * ( ZF(K) + ZF(K-1) )
+          ENDDO   
+!           print *,' I,J,ZF(1),DZ8W(I,1,J),ts=',I,J,ZF(1),DZ8W(I,1,J),ITIMESTEP
           
           IFLAND = XLAND(I,J)
 
@@ -467,12 +556,70 @@ CONTAINS
           FMSAND_PX(I,J) = FFMSAND * 0.01
           !-- end
 
+          ! initialize urban arrays for temporary hack
+!          STANG_FNL(I,J) = 0.0
+          VEGU_FNL(I,J)  = 0.0
+          PPLN_FNL(I,J)  = 0.0
+          LCZRUN = .FALSE.
+          LCZtot = 0.
+          sumhb = 0.0
+          sumlp = 0.0
+          sumbk1 = 0.0
+          sumbk2 = 0.0
+
+          IF (ISPXURB .AND. (URBF2D(I,J) .GT. 0.0)) THEN
+            IF(LAND_USE_TYPE=='NLCD51')then
+              STDIR1(I,J) = 05
+              STDIR2(I,J) = 95               
+!              print *,' nlcat,zf(1)=',i,j,URBF2D(I,J),nlcat,zf(1)
+              Do lcat = 41, nlcat
+                lcztot = lcztot + LANDUSEF(I,LCAT,J)
+              enddo
+              if(LCZtot.gt.0.01) then
+                LCZRUN = .TRUE.
+                Do lcat = 41, nlcat
+                  lcatm40 = lcat-40
+                  sumhb = sumhb + HB_LCZ(lcatm40)*LANDUSEF(I,LCAT,J)
+                  sumlp = sumlp +LAMP_LCZ(lcatm40)*LANDUSEF(I,LCAT,J)
+                  sumbk1 = sumbk1 + BLKW1_LCZ(lcatm40)*LANDUSEF(I,LCAT,J)
+                  sumbk2 = sumbk2 + BLKW2_LCZ(lcatm40)*LANDUSEF(I,LCAT,J)
+                ENDDO   
+                HGTBDG(I,J) = sumhb/lcztot
+                LAMP(I,J)   = sumlp/lcztot
+                blkw1(i,J) =  sumbk1/lcztot
+                blkw2(i,J) =  sumbk2/lcztot
+              else
+               HGTBDG(I,J) = (10.*LANDUSEF(I,24,J)+ 20.*LANDUSEF(I,25,J)+ 50.*LANDUSEF(I,26,J))/URBF2D(I,J)
+               LAMP(I,J)   = (0.15*LANDUSEF(I,24,J)+ 0.25*LANDUSEF(I,25,J)+ 0.4*LANDUSEF(I,26,J))/URBF2D(I,J)
+               blkw1(i,J) = (80.*LANDUSEF(I,24,J)+ 70.*LANDUSEF(I,25,J)+ 70.*LANDUSEF(I,26,J))/URBF2D(I,J)
+               blkw2(i,J)  = (200*LANDUSEF(I,24,J)+ 180*LANDUSEF(I,25,J)+ 180.*LANDUSEF(I,26,J))/URBF2D(I,J)
+!               WSTT(I,J) = (20.*LANDUSEF(I,24,J)+ 20.*LANDUSEF(I,25,J)+ 25.*LANDUSEF(I,26,J))/URBF2D(I,J)
+    !             print *,'i.j.URBF2D,lcztot =',i,j,URBF2D(I,J),LCZtot
+              endif
+              BB1 = blkw1(i,J) +20.  ! WST = 20. which is subtract in SURFPX
+              BB2 = blkw2(i,J) +20.
+            ELSE   ! No LCZ
+              IF(HGTBDG(I,J) .LT. 0.1) THEN
+                HGTBDG(I,J) = (10.*LANDUSEF(I,24,J)+ 20.*LANDUSEF(I,25,J)+ 50.*LANDUSEF(I,26,J))/URBF2D(I,J)
+                LAMP(I,J)   = (0.15*LANDUSEF(I,24,J)+ 0.25*LANDUSEF(I,25,J)+ 0.4*LANDUSEF(I,26,J))/URBF2D(I,J)
+                LAMF(I,J)   = (0.08*LANDUSEF(I,24,J)+ 0.1*LANDUSEF(I,25,J)+ 0.4*LANDUSEF(I,26,J))/URBF2D(I,J)
+              ENDIF
+              BB1 = blkw1(i,J)*(1-LANDUSEF(I,KWAT,J))
+              BB2 = blkw2(i,J)*(1-LANDUSEF(I,KWAT,J))
+            ENDIF
+            PPLN_FNL(I,J)  = HGTBDG(I,J) * LAMP(I,J) * 4444.4 ! p/km2
+            VEGU_FNL(I,J)  = (0.15*LANDUSEF(I,24,J)+ 0.05*LANDUSEF(I,25,J)+ 0.01*LANDUSEF(I,26,J))/URBF2D(I,J)
+          ENDIF
+
           !--  Variables Sub. SURFPX needs
           SFCPRS = PSFC(i,j) / 1000.0                 ! surface pressure in cb
+
           TA1    = T3D(i,1,j)                         ! air temperature at first layer
           DENS1  = RHO(I,1,J)                         ! air density at first layer
+
           QV1    = QV3D(i,1,j)                        ! water vapor mixing ratio at first layer
           QV2    = QV3D(i,2,j)
+
           ZLVL   = 0.5 * DZ8W(i,1,j)                  ! thickness of lowest half level
           ZF1    = DZ8W(i,1,j)
           ZA2    = ZF1 + 0.5 * DZ8W(i,2,j)
@@ -483,10 +630,100 @@ CONTAINS
                                                       ! convert RAINBL from mm to m for PXLSM
           WR     = 1.0E-3*CANWAT(I,J)                 ! convert CANWAT from mm to m for PXLSM
           THETA1 = TH3D(i,1,j)                        ! potential temp at first layer
+
           SNOBS  = SNOW(I,J)                          ! Set snow cover to existing model value
                                                       !   this is overwritten below if snow analysis is availiable
                                                       !   otherwise snow cover remains constant through simulation
-                   
+
+          IF (ITIMESTEP.EQ.1) THEN
+            
+            STWAT(I,J) = CANWAT(I,J)
+            RFWAT(I,J) = CANWAT(I,J) 
+            TG_RF(I,J) = TSLB(I,1,J)                ! Initialization of the surface and bottom layer temperatures 
+            T2_RF(I,J) = TSLB(I,2,J)                !  for the Roof and Walls with that of soil layers    
+            TG_WL(I,J) = TSLB(I,1,J)
+            T2_WL(I,J) = TSLB(I,2,J)
+            T2_GND(I,J) = TSLB(I,2,J)
+          ENDIF     
+
+          CNP=-1
+          !-- Estimation of the urban canopy height level (Model-level)
+          IF (ISPXURB .AND. (URBF2D(I,J) .GT. 0.0)) THEN 
+            DO K = kts, kte
+              IF ((HGTBDG(I,J) .GE. ZF(K-1)) .AND. (HGTBDG(I,J) .LE. ZF(K))) THEN 
+                  KSL(I,J) = K
+              ENDIF
+            ENDDO
+            if(ksl(i,j).lt.1) Then
+                  PRINT *, ' HGTBDG,ksl=',HGTBDG(I,J),KSL(i,j)
+                 PRINT *, ' ZF0-4=',ZF(0) ,ZF(1),ZF(2),ZF(3),ZF(4)
+                 PRINT *, ' DZF1-4=',DZ8w(i,1,j),DZ8w(i,2,j),DZF(3),DZF(4)
+            ENDIF
+          ENDIF
+          
+          IF (ISPXURB .AND. (URBF2D(I,J) .GT. 0.0)) THEN    ! For UTK-Urban 
+            cnp = ksl(i,j)
+            if(cnp.lt.1) PRINT *, ' URBF2D(I,J),CNP,HGTBDG(I,J)=',i,j,URBF2D(I,J),CNP,HGTBDG(I,J),KSL(i,j)
+            WR_VEG    = (1.0E-3*CANWAT(I,J))
+            WR_ST     = (1.0E-3*STWAT(I,J))     
+            WR_RF     = (1.0E-3*RFWAT(I,J))
+            DENSRF    = RHO(i,CNP,j)       
+            QV_RF     = QV3D(i,CNP,j)                 ! water-vapor mixing ratio at urban canopy layer
+            QV_RF1    = QV3D(i,CNP+1,j)               ! water-vapor mixing ratio at one layer above the urban canopy layer
+            TA_RF     = T3D(i,CNP,j)                  ! air temperature at roof layer
+            THETA_RF  = TH3D(i,CNP,j)                 ! potential temp at urban canopy layer
+            THETA_RF1 = TH3D(i,CNP+1,j)               ! potential temp at one layer above the urban canopy layer
+            DZFRF     = DZF(CNP)                      ! vertical layer thickness
+
+            US_RF1 = U3D(i,CNP+1,j)                   ! Horz. wind components at one layer above the urban canopy level
+            VS_RF1 = V3D(i,CNP+1,j)
+            US_RF  = U3D(i,CNP,j)                     ! Horz. wind components at urban canopy level
+            VS_RF  = V3D(i,CNP,j)        
+            PP_RF  = PP3D(i,CNP,j) / 1000.0           ! Pressure at urban canopy level in cb (kPa) 
+
+            THETAV_RF  = THETA_RF * (1.0 + EP1 * QV_RF)
+            THETAV_RF1 = THETA_RF1 * (1.0 + EP1 * QV_RF1)  
+
+            THETA_RFs  = TG_RF(I,J) * ((100.0 / PP_RF)**0.285)     ! Conversion of Roof- surface temp. to Pot. temp.
+            THETAV_RFs = THETA_RFs * (1.0 + EP1 * QV_RF)
+
+            ZF_CNP1 = ZF(CNP)
+            ZF_CNP0 = ZF(CNP-1)
+
+            ZA_CNP2 = ZA(CNP+1) 
+            ZA_CNP1 = ZA(CNP)
+
+            !-- Urban canopy calculations for walls
+            DENS_CAN  = 0.0
+            THETA_CAN = 0.0
+            TA_CAN    = 0.0
+            US_CAN    = 0.0
+            VS_CAN    = 0.0
+            WSP_CAN(I,J)   = 0.0 
+            QV_CAN    = 0.0
+            PP_CAN    = 0.0
+            DO K = kts,CNP
+              DENS_CAN  = DENS_CAN + RHO(i,K,j)  
+              THETA_CAN = THETA_CAN + TH3D(i,K,j)
+              TA_CAN    = TA_CAN + T3D(i,K,j)
+              US_CAN    = U3D(i,K,j)
+              VS_CAN    = V3D(i,K,j)
+              WSP_CAN(I,J)   = WSP_CAN(I,J) + MAX(SQRT(US_CAN**2 + VS_CAN**2), 0.01) 
+              QV_CAN    = QV_CAN + QV3D(i,K,j)
+              PP_CAN    = PP_CAN + (PP3D(i,K,j) / 1000.0)          ! Air pressure in kPa
+            ENDDO
+            
+            DENS_CAN  = DENS_CAN/CNP                  ! Average air density within the urban canopy
+            THETA_CAN = THETA_CAN/CNP                 ! Average air potential temperature (K) within the urban canopy
+            TA_CAN    = TA_CAN/CNP                    ! Average air temperature (K) within the urban canopy
+            WSP_CAN(I,J)   = WSP_CAN(I,J)/CNP                   ! Average horz. wind speed within the urban canopy
+            QV_CAN    = QV_CAN/CNP                    ! Average water-vapor mixing ratio within the urban canopy
+            PP_CAN    = PP_CAN/CNP                    ! Average air pressure within the urban canopy
+
+            THETA_WLs = TG_WL(I,J) * ((100.0 / PP_CAN)**0.285)     ! Conversion of Walls- surface temp. to Pot. temp.
+          ENDIF  ! urban
+
+
           IF(PXLSM_SOIL_NUDGE .EQ. 1) THEN                   
             !-- 2 m Temp and RH for Nudging
             T2_OLD = T2_NDG_OLD(I,J)
@@ -511,6 +748,11 @@ CONTAINS
           
           Z0       = ZNT(I,J)
           CPAIR    = CPD * (1.0 + 0.84 * QV1)            ! J/(K KG)
+
+          IF (ISPXURB .AND. (URBF2D(I,J) .GT. 0.0)) THEN   ! For UTK-Urban     
+            CPAIR_RF  = CPD * (1.0 + 0.84 * QV_RF)             ! J/(K KG)
+            CPAIR_CAN = CPD * (1.0 + 0.84 * QV_CAN)            ! J/(K KG) 
+          ENDIF
 
           ! Set WRF Snow albedo to PX snow albedo based on fractional landuse
           ! Snow albedo for each landuse class is defined in module_sf_pxlsm_data.F
@@ -593,13 +835,13 @@ CONTAINS
           !-------------------------------------------------------------
 
 
-          SOLDN  = GSW(I,J) / (1.0 - ALBEDO(I,J))     ! downward shortwave radiaton
+          SOLDN = GSW(I,J) / (1.0 - ALBEDO(I,J))     ! downward shortwave radiaton
+
           ISNOW = SNOWC(I,J)
 
-
-          NUDGE=PXLSM_SOIL_NUDGE
-          IF ( J .LE. 2 .OR. J .GE. (jde-1) ) NUDGE=0
-          IF ( I .LE. 2 .OR. I .GE. (ide-1) ) NUDGE=0
+          NUDGE = PXLSM_SOIL_NUDGE
+          IF ( J .LE. 2 .OR. J .GE. (jde-1) ) NUDGE = 0
+          IF ( I .LE. 2 .OR. I .GE. (ide-1) ) NUDGE = 0
           
           IF ( RMOL(I,J) .GT. 0.0 )  THEN
               MOLX = AMIN1(1/RMOL(I,J),1000.0)
@@ -618,7 +860,7 @@ CONTAINS
           NTSPS = INT(DT / (DTPBLX + 0.000001) + 1.0)                                
           DTPBL = DT / NTSPS                                                       
 
-          DO IT=1,NTSPS                                                     
+          DO IT = 1, NTSPS                                                     
           
             !... SATURATION VAPOR PRESSURE (MB) 
             IF ( TSLB(I,1,J) .LE. SVPT0 ) THEN        ! For ground that is below freezing
@@ -627,6 +869,12 @@ CONTAINS
               ES = SVP1 * EXP(SVP2 * (TSLB(I,1,J) - SVPT0) /  (TSLB(I,1,J) - SVP3))
             ENDIF
             QSS  = ES * 0.622 / (SFCPRS - ES)
+
+            !...Saturation vapor pressure and saturation mixing ratio at Roof for Urban grid cell
+            IF (ISPXURB .AND. (URBF2D(I,J) .GT. 0.0)) THEN 
+              ES     = SVP1 * EXP(SVP2 * (TG_RF(I,J) - SVPT0) / (TG_RF(I,J) - SVP3)) 
+              QSS_RF = ES * 0.622 / (PP_RF - ES) 
+            ENDIF
           
             !... beta method, Lee & Pielke (JAM,May1992)
             BETAP = 1.0
@@ -635,23 +883,34 @@ CONTAINS
             ENDIF
             
             !-------------------------------------------------------------------------
-            CALL SURFPX (DTPBL, IFLAND, SNOWC(I,J),  NUDGE, XICE(I,J),          & !in
-                      SOLDN,  GSW(I,J), LWDN,   EMISSI, ZLVL,                   & !in
-                      MOLX,    Z0,    USTAR,                                    & !in
-                      SFCPRS, DENS1,  QV1,    QSS,   TA1,                       & !in
-                      THETA1,   PRECIP,                                         & !in
-                      CPAIR, PSIH(I,J),                                         & !in
-                      RH2OBS,T2OBS(I,J),                                        & !in
-                      VEGF_PX(I,J), ISTI, LAI_PX(I,J), IMPERV(I,J), CANFRA(I,J),   & !in
-                      BETAP, RSTMIN(I,J), HC_SNOW, SNOW_FRA, WETFRA(I,J),       & !in          
-                      FWWLT, FWFC, FWRES, FCGSAT,  FWSAT, FB,                   & !in    ! Soil model updates - JEP 12/14
-                      FC1SAT,FC2R,FAS,FJP,FC3,DZS(1),DZS(2),QST12,              & !in
-                      RADNET(I,J), GRDFLX(I,J), HFX(I,J), QFX(I,J), LH(I,J),    & !out
-                      EG(I,J), ER(I,J), ETR(I,J),                               & !out
-                      QST(I,J), CAPG(I,J), RS(I,J), RA(I,J),                    & !out
-                      TSLB(I,1,J), TSLB(I,2,J),                                 & !out
-                      SMOIS(I,1,J), SMOIS(I,2,J), WR,                           &
-                      TA2(I,J), QA2(I,J), LAND_USE_TYPE,I,J )
+            CALL SURFPX(ITIMESTEP,DTPBL, ISPXURB, IFLAND, SNOWC(I,J),  NUDGE, XICE(I,J),          & !in
+                        JULIAN, XTIME, GMT, SOLDN,  GSW(I,J), LWDN,   EMISSI, ZLVL,     & !in
+                        MOLX, Z0, USTAR, ZA_CNP2, ZA_CNP1, ZF_CNP1, ZF_CNP0, DZFRF,     & !in
+                        SFCPRS, DENS1, DENSRF, QV1, QV_RF, QSS, QSS_RF, TA1, TA_RF,     & !in --UTK-Urban
+                        THETA1, THETA_RF, PRECIP, THETAV_RF, THETA_RF1, THETAV_RF1,     & !in --UTK-Urban
+                        THETA_RFs, THETAV_RFs, THETA_WLs,                               & !in --UTK-Urban
+                        CPAIR, CPAIR_RF, PSIH(I,J), US_RF1, US_RF, VS_RF1, VS_RF,       & !in --UTK-Urban
+                        DENS_CAN, THETA_CAN, TA_CAN, WSP_CAN(I,J), CPAIR_CAN,           & !in --UTK-Urban
+                        RH2OBS, T2OBS(I,J),                                             & !in
+                        VEGF_PX(I,J), ISTI, LAI_PX(I,J), IMPERV(I,J), CANFRA(I,J),      & !in
+                        BETAP, RSTMIN(I,J), HC_SNOW, SNOW_FRA, WETFRA(I,J),             & !in          
+                        FWWLT, FWFC, FWRES, FCGSAT,  FWSAT, FB,                         & !in
+                        FC1SAT, FC2R, FAS, FJP, FC3, DZS(1), DZS(2), QST12,             & !in
+                        URBF2D(I,J), COSZ(I,J), CURR_SECS, ALBEDO(I,J),                 & !-- DDY and UTK Urban in
+                        XLAT(I,J), XLONG(I,J), SINA(I,J), COSA(I,J),                    & !in --Urban
+                        RADNET(I,J), GRDFLX(I,J), HFX(I,J), QFX(I,J), LH(I,J),          & !out
+                        HFX_RF(I,J), HFX_WL(I,J), ANTHFX1(I,J), ANTHFX_RF(I,J), QFX_RF(I,J), LH_RF(I,J),   & !out --UTK-Urban
+                        EG(I,J), ER(I,J), ETR(I,J), ER_ST(I,J), ER_RF(I,J),                                & !out --UTK-Urban
+                        QST(I,J), CAPG(I,J), RS(I,J), RA(I,J),                                             & !out
+                        TSLB(I,1,J), T2_GND(I,J), TG_RF(I,J), T2_RF(I,J), TG_WL(I,J), T2_WL(I,J),          & !out --UTK-Urban
+                        RADWL(I,J), RADWL_FNL(I,J), RADST(I,J), RADST_FNL(I,J), GSW_URB(I,J), GSW_WL(I,J), & !out --UTK-Urban
+                        RADNET_URB(I,J), RADNET_RF(I,J), RADNET_WL(I,J), LWDN_URB(I,J), LWDN_RF(I,J),      & !out --UTK-Urban
+                        LWDN_WL(I,J), LWUP_URB(I,J), LWUP_RF(I,J), LWUP_WL(I,J),                           & !out --UTK-Urban
+                        SMOIS(I,1,J), SMOIS(I,2,J), WR, WR_ST, WR_VEG, WR_RF,                              & !out --UTK-Urban
+                        TA2(I,J), QA2(I,J), LAND_USE_TYPE, I, J,                                           &
+                        HGTBDG(I,J), LAMP(I,J), LAMF(I,J), STDIR1(I,J), STDIR2(I,J), BB1, BB2,             & !    --UTK Urban
+                        PPLN_FNL(I,J), VEGU_FNL(I,J), KSL(I,J), SWDDIR(I,J), SWDDIF(I,J),                  &
+                        GAB_RF(I,J),GAB_WL(I,J)                                                            ) !    --UTK Urban
             !-------------------------------------------------------------------------
           
           END DO                        ! Time internal PX time loop   
@@ -662,12 +921,18 @@ CONTAINS
           ELSE
             TSK(I,J)  = TSLB(I,1,J)     ! Skin temp set to 1 cm soil temperature in PX for now
           ENDIF
-          CANWAT(I,J) = WR * 1000.      ! convert WR back to mm for CANWAT
-          RAW         = RA(I,J) + 4.503 / USTAR
-          QSFC(I,J)   = QFX(I,J) * RAW / DENS1 + QV1
+          IF (ISPXURB .AND. (URBF2D(I,J) .GT. 0.0)) THEN  ! For UTK-Urban
+             CANWAT(I,J) =  WR_VEG * 1000.    ! convert WR back to mm for CANWAT
+             STWAT(I,J)  =  WR_ST * 1000.     ! convert WR back to mm for STWAT       
+             RFWAT(I,J)  =  WR_RF * 1000.     ! convert WR back to mm for RFWAT
+          ELSE
+             CANWAT(I,J) =  WR * 1000.        ! convert WR back to mm for CANWAT
+          ENDIF
+          RAW        = RA(I,J) + 4.503 / USTAR
+          QSFC(I,J)  = QFX(I,J) * RAW / DENS1 + QV1
           
-       ENDDO !  END MIAN I LOOP
-      ENDDO  !  END MAIN J LOOP
+        ENDDO !  END MAIN I LOOP
+      ENDDO   !  END MAIN J LOOP
       
 !------------------------------------------------------
    END SUBROUTINE pxlsm
@@ -677,15 +942,16 @@ CONTAINS
 
 !-------------------------------------------------------------------------
 !-------------------------------------------------------------------------
-      SUBROUTINE VEGELAND( landusef, vegfra,                            & 
-                            shdmin, shdmax,                             &                          
-                            soilctop, soilcbot, nlcat, nscat,znt, xlai, &
-                            xlaimn, rstmin, xveg, xvegmn, xsnup, xland, &
-                            xalb, xsnoalb, wetfra, imperv, canfra,      &
-                            ids,ide, jds,jde, kds,kde,                  &
-                            ims,ime, jms,jme, kms,kme,                  &
-                            its,ite, jts,jte, kts,kte,                  &
-                            LAND_USE_TYPE, KWAT_OUT )
+      SUBROUTINE VEGELAND(landusef, vegfra,                            & 
+                          shdmin, shdmax,                              &                          
+                          soilctop, soilcbot, nlcat, nscat,znt, xlai,  &
+                          xlaimn, rstmin, xveg, xvegmn, xsnup, xland,  &
+                          xalb, xsnoalb, wetfra, imperv, canfra,       &
+                          urbf2d, ispxurb,                             & !-- DDY, UTK
+                          ids,ide, jds,jde, kds,kde,                   &
+                          ims,ime, jms,jme, kms,kme,                   &
+                          its,ite, jts,jte, kts,kte,                   &
+                          LAND_USE_TYPE, KWAT_OUT                      )
 !-------------------------------------------------------------------------
 !           
 !   CALLED FROM Sub. bl_init in module_physics.init.F
@@ -705,26 +971,30 @@ CONTAINS
                               
       IMPLICIT NONE
 !... 
-      INTEGER,  INTENT(IN)        ::  ids,ide, jds,jde, kds,kde,  &
-                                      ims,ime, jms,jme, kms,kme,  &
-                                      its,ite, jts,jte, kts,kte
+      INTEGER, INTENT(IN)        ::  ids,ide, jds,jde, kds,kde,  &
+                                     ims,ime, jms,jme, kms,kme,  &
+                                     its,ite, jts,jte, kts,kte
                                                                             
-      INTEGER , INTENT(IN)        ::  NSCAT, NLCAT
+      INTEGER, INTENT(IN)        ::  NSCAT, NLCAT
 
-      REAL,    DIMENSION( ims:ime , 1:NLCAT, jms:jme ),  INTENT(IN) :: LANDUSEF                        
-      REAL,    DIMENSION( ims:ime , 1:NSCAT, jms:jme ),  INTENT(IN) :: SOILCTOP, SOILCBOT
+      REAL, DIMENSION( ims:ime, 1:NLCAT, jms:jme ), INTENT(IN) :: LANDUSEF                        
+      REAL, DIMENSION( ims:ime, 1:NSCAT, jms:jme ), INTENT(IN) :: SOILCTOP, SOILCBOT
                                                                    
-      REAL,    DIMENSION( ims:ime, jms:jme ),            INTENT(IN) ::  VEGFRA, SHDMIN, SHDMAX 
+      REAL, DIMENSION( ims:ime, jms:jme ), INTENT(IN)    :: VEGFRA, SHDMIN, SHDMAX 
 
-      REAL,     DIMENSION( ims:ime, jms:jme ), INTENT(INOUT) :: ZNT, IMPERV, CANFRA
+      REAL, DIMENSION( ims:ime, jms:jme ), INTENT(INOUT) :: ZNT, IMPERV, CANFRA, XLAND
 
-      REAL,     DIMENSION( ims:ime, jms:jme ), INTENT(OUT) :: XLAI, XLAIMN, RSTMIN, XALB, &
-                                                              XVEG, XVEGMN, XSNUP, XLAND, &
-                                                              WETFRA, XSNOALB 
+      REAL, DIMENSION( ims:ime, jms:jme ), INTENT(OUT)   :: XLAI, XLAIMN, RSTMIN, XALB, &
+                                                            XVEG, XVEGMN, XSNUP,        &
+                                                            WETFRA, XSNOALB 
 
-      INTEGER, INTENT(OUT)      ::  KWAT_OUT
+      INTEGER, INTENT(OUT)            :: KWAT_OUT
 
       CHARACTER (LEN = 6), INTENT(IN) :: LAND_USE_TYPE
+
+      !-UTK Urban 
+      LOGICAL, INTENT(IN) :: ISPXURB
+      REAL, PARAMETER     :: Z0ST = 30.0            ! Urban street surface roughness length (cm)
 
                                      
 !... local variables
@@ -734,7 +1004,8 @@ CONTAINS
                  ALAI, VEGF, SUMSNUP, SUMALB, SUMSNOALB
                  
       REAL    :: VFMX, VFMN, VSEAS, FAREA, FWAT, ZNOTC, FCAN, FIMP, FORFRA, EXTFOR
-      REAL,   DIMENSION( NLCAT )  :: LAIMX, LAIMN, Z0, VEG, VEGMN, SNUP, ALB, SNOALB
+
+      REAL, DIMENSION( NLCAT ) :: LAIMX, LAIMN, Z0, VEG, VEGMN, SNUP, ALB, SNOALB
 
       REAL, PARAMETER :: ZNOTCMN = 5.0  ! CM, MIN Zo FOR CROPS
       REAL, PARAMETER :: ZNOTCMX = 15.0 ! CM, MAX Zo FOR CROPS
@@ -745,6 +1016,16 @@ CONTAINS
       !---- INITIALIZE PARAMETERS
       INTEGER, SAVE :: KWAT, LIMIT1, LIMIT2
 
+      !-- DDY urban
+      REAL, DIMENSION(its:ite, jts:jte), INTENT(INOUT) :: URBF2D
+      REAL :: LUTOT, URBF
+      INTEGER NLCATX
+      
+
+!--------------------------------------------------------------------------------------
+!--------------------------------------------------------------------------------------
+
+      NLCATX = NLCAT
      ! Initialize LU characteristics by LU Dataset
       IF (LAND_USE_TYPE == 'USGS') THEN
          KWAT = 16
@@ -798,6 +1079,20 @@ CONTAINS
          SNOALBF=> SNOALB_NLCD40
          LIMIT1 = 20
          LIMIT1 = 43
+      ELSE IF (LAND_USE_TYPE == 'NLCD51') THEN
+         KWAT = 17
+         RSMIN  => RSMIN_NLCD51
+         Z00    => Z00_NLCD51  
+         VEG0   => VEG0_NLCD51 
+         VEGMN0 => VEGMN0_NLCD51 
+         LAI0   => LAI0_NLCD51 
+         LAIMN0 => LAIMN0_NLCD51 
+         SNUP0  => SNUP0_NLCD51 
+         ALBF   => ALBF_NLCD51
+         SNOALBF=> SNOALB_NLCD51
+         LIMIT1 = 20
+         LIMIT1 = 43
+         NLCATX  = 40
       ELSE IF (LAND_USE_TYPE == 'MODIS') THEN
          KWAT = 17
          RSMIN  => RSMIN_MODIS
@@ -838,17 +1133,41 @@ CONTAINS
 
       DO J = jts,jte
         DO I = its,ite
+          !-- DDY urban, calculate urban fraction
+          URBF2D(I,J) = -1.
+          LUTOT = 0.0
+          DO K = 1,NLCATX
+            LUTOT = LUTOT + LANDUSEF(I,K,J)
+          ENDDO
+          IF (LUTOT .GT. 0.0) THEN
+            URBF = (LANDUSEF(I,24,J)+LANDUSEF(I,25,J)+LANDUSEF(I,26,J))/LUTOT  !-Only for NLCD40 here.
+            IF(URBF.GT.0.05) URBF2D(I,J) = URBF
+          ENDIF
+
           !-- Initialize 2 and 3-D veg parameters to be caculated
-          DO K=1,NLCAT
-            LAIMX(K) = LAI0(K)                                                       
-            LAIMN(K) = LAIMN0(K)                                                   
-            Z0(K)    = Z00(K)                                                   
-            VEG(K)   = VEG0(K)                                              
-            VEGMN(K) = VEGMN0(K)
-            SNUP(K)  = SNUP0(K)                                            
-            ALB(K)   = ALBF(K)                                            
-            SNOALB(K)= SNOALBF(K)                                            
+          DO K = 1, NLCAT
+            LAIMX(K)  = LAI0(K)                                                       
+            LAIMN(K)  = LAIMN0(K)                                                   
+            Z0(K)     = Z00(K)                                                   
+            VEG(K)    = VEG0(K)                                              
+            VEGMN(K)  = VEGMN0(K)
+            SNUP(K)   = SNUP0(K)                                            
+            ALB(K)    = ALBF(K)                                            
+            SNOALB(K) = SNOALBF(K)                                            
           ENDDO                                              
+
+          !-- Set Urban street roughness length here to 'Z0ST' (in cm.) for the domain of interest  !--UTK urban
+          IF (ISPXURB .AND. (URBF2D(I,J) .GT. 0.0)) THEN
+            IF (LAND_USE_TYPE == 'USGS') THEN           !--For USGS (24-Cat) landuse here. 
+              Z0(1)  = Z0ST 
+            ELSE IF (LAND_USE_TYPE == 'USGS28') THEN
+              Z0(1)  = Z0ST
+            ELSE  !  NLCD40
+              Z0(24) = Z0ST
+              Z0(25) = Z0ST
+              Z0(26) = Z0ST
+            ENDIF
+          ENDIF
 
           !--  INITIALIZE SUMS
           SUMLAI    = 0.0
@@ -876,7 +1195,7 @@ CONTAINS
             ENDIF
 
             ZNOTC = ZNOTCMN * (1-VSEAS) + ZNOTCMX * VSEAS  ! Zo FOR CROPS
-            DO K = 1, NLCAT
+            DO K = 1, NLCATX
               IF (LAND_USE_TYPE == 'MODIS') THEN
                 !-- USE THE VEGFRAC DATA ONLY FOR CROPS
                 IF (K.EQ.12 .OR. K.EQ.14) THEN
@@ -907,7 +1226,7 @@ CONTAINS
                       Z0(K)  = 0.5 * (ZNOTC + Z00(K))
                   ENDIF
                 ENDIF
-              ELSE IF (LAND_USE_TYPE == 'NLCD40') THEN
+              ELSE IF (LAND_USE_TYPE == 'NLCD40'.or.LAND_USE_TYPE == 'NLCD51') THEN
                 !-- USE THE VEGFRAC DATA ONLY FOR CROPS
                 IF (K.EQ.12 .OR. K.EQ.14 .OR. K.EQ.38) THEN
                    LAIMX(K) = LAIMN0(K) * (1-VSEAS) + LAI0(K) * VSEAS
@@ -961,93 +1280,93 @@ CONTAINS
 
           !-------------------------------------
           !-- LOOP THROUGH LANDUSE Fraction and compute totals
-          DO K = 1, NLCAT 
-            FAREA    = LANDUSEF(I,K,J)
-            SUMLAI   = SUMLAI + LAIMX(K) * FAREA
-            SUMLMN   = SUMLMN + LAIMN(K) * FAREA
-            ALAI     = ALAI + FAREA
-            SUMRSI   = SUMRSI + FAREA * LAIMX(K) / RSMIN(K)
-            SUMLZ0   = SUMLZ0 + FAREA * ALOG(Z0(K))
-            SUMVEG   = SUMVEG + FAREA * VEG(K)
-            SUMVMN   = SUMVMN + FAREA * VEGMN(K)
-            SUMSNUP  = SUMSNUP+ FAREA * SNUP(K)
-            SUMALB   = SUMALB + FAREA * ALB(K)
-            SUMSNOALB= SUMSNOALB + FAREA * SNOALB(K)
+          DO K = 1, NLCATX 
+            FAREA     = LANDUSEF(I,K,J)
+            SUMLAI    = SUMLAI + LAIMX(K) * FAREA
+            SUMLMN    = SUMLMN + LAIMN(K) * FAREA
+            ALAI      = ALAI + FAREA
+            SUMRSI    = SUMRSI + FAREA * LAIMX(K) / RSMIN(K)
+            SUMLZ0    = SUMLZ0 + FAREA * ALOG(Z0(K))
+            SUMVEG    = SUMVEG + FAREA * VEG(K)
+            SUMVMN    = SUMVMN + FAREA * VEGMN(K)
+            SUMSNUP   = SUMSNUP+ FAREA * SNUP(K)
+            SUMALB    = SUMALB + FAREA * ALB(K)
+            SUMSNOALB = SUMSNOALB + FAREA * SNOALB(K)
           ENDDO
 
           FWAT = LANDUSEF(I,KWAT,J)
           !-- CHECK FOR WATER
           IF (FWAT .GE. 0.50) THEN        ! Changed WRFV3.7
-            XLAI(I,J)   = LAIMX(KWAT)
-            XLAIMN(I,J) = LAIMN(KWAT)
-            RSTMIN(I,J) = RSMIN(KWAT)
-            ZNT(I,J)    = Z0(KWAT)
-            XVEG(I,J)   = VEG(KWAT)
-            XVEGMN(I,J) = VEGMN(KWAT)
-            XSNUP(I,J)  = SNUP(KWAT)
-            XALB(I,J)   = ALB(KWAT)
-            XSNOALB(I,J)= SNOALB(KWAT)
+            XLAI(I,J)    = LAIMX(KWAT)
+            XLAIMN(I,J)  = LAIMN(KWAT)
+            RSTMIN(I,J)  = RSMIN(KWAT)
+            ZNT(I,J)     = Z0(KWAT)
+            XVEG(I,J)    = VEG(KWAT)
+            XVEGMN(I,J)  = VEGMN(KWAT)
+            XSNUP(I,J)   = SNUP(KWAT)
+            XALB(I,J)    = ALB(KWAT)
+            XSNOALB(I,J) = SNOALB(KWAT)
           ELSE
             IF (FWAT .GT. 0.10) THEN
               ALAI   = ALAI - FWAT
               SUMLZ0 = SUMLZ0 - FWAT * ALOG(Z0(KWAT))
             ENDIF
-            XLAI(I,J)   = SUMLAI / ALAI
-            XLAIMN(I,J) = SUMLMN / ALAI
-            RSTMIN(I,J) = SUMLAI / SUMRSI
-            ZNT(I,J)    = EXP(SUMLZ0/ALAI)
-            XVEG(I,J)   = SUMVEG / ALAI
-            XVEGMN(I,J) = SUMVMN / ALAI
-            XSNUP(I,J)  = SUMSNUP
-            XALB(I,J)   = SUMALB
-            XSNOALB(I,J)= SUMSNOALB
+            XLAI(I,J)    = SUMLAI / ALAI
+            XLAIMN(I,J)  = SUMLMN / ALAI
+            RSTMIN(I,J)  = SUMLAI / SUMRSI
+            ZNT(I,J)     = EXP(SUMLZ0/ALAI)
+            XVEG(I,J)    = SUMVEG / ALAI
+            XVEGMN(I,J)  = SUMVMN / ALAI
+            XSNUP(I,J)   = SUMSNUP
+            XALB(I,J)    = SUMALB
+            XSNOALB(I,J) = SUMSNOALB
           ENDIF
 
           IF (FWAT .GT. 0.50) THEN
-            ZNT(I,J)    = Z0(KWAT)
-            XALB(I,J)   = ALB(KWAT)
-            XSNOALB(I,J)= SNOALB(KWAT)
+            ZNT(I,J)     = Z0(KWAT)
+            XALB(I,J)    = ALB(KWAT)
+            XSNOALB(I,J) = SNOALB(KWAT)
           ENDIF
 
           !-- Compute wetlands fraction for proper MMLUIN data set
           !-- Note: if LU categories change, these hard coded indicies must be updated
           IF (LAND_USE_TYPE == 'USGS') THEN
-            WETFRA(I,J)  = LANDUSEF(I,17,J)+LANDUSEF(I,18,J)
+            WETFRA(I,J) = LANDUSEF(I,17,J)+LANDUSEF(I,18,J)
           ELSE IF (LAND_USE_TYPE == 'USGS28') THEN
-            WETFRA(I,J)  = LANDUSEF(I,17,J)+LANDUSEF(I,18,J)
+            WETFRA(I,J) = LANDUSEF(I,17,J)+LANDUSEF(I,18,J)
           ELSE IF (LAND_USE_TYPE == 'NLCD50') THEN
-            WETFRA(I,J)  = LANDUSEF(I,22,J)+LANDUSEF(I,23,J)+LANDUSEF(I,27,J)+LANDUSEF(I,28,J)+LANDUSEF(I,42,J)
-          ELSE IF (LAND_USE_TYPE == 'NLCD40') THEN
-            WETFRA(I,J)  = LANDUSEF(I,39,J)+LANDUSEF(I,40,J)+LANDUSEF(I,11,J)
+            WETFRA(I,J) = LANDUSEF(I,22,J)+LANDUSEF(I,23,J)+LANDUSEF(I,27,J)+LANDUSEF(I,28,J)+LANDUSEF(I,42,J)
+          ELSE IF (LAND_USE_TYPE == 'NLCD40'.or.LAND_USE_TYPE == 'NLCD51') THEN
+            WETFRA(I,J) = LANDUSEF(I,39,J)+LANDUSEF(I,40,J)+LANDUSEF(I,11,J)
           ELSE IF (LAND_USE_TYPE == 'MODIS') THEN
-            WETFRA(I,J)  = LANDUSEF(I,11,J)
+            WETFRA(I,J) = LANDUSEF(I,11,J)
           END IF
 
-          ZNT(I,J)    = ZNT(I,J) * 0.01           !CONVERT TO M
-          XVEG(I,J)   = XVEG(I,J) * 0.01          !CONVERT TO FRAC
-          XVEGMN(I,J) = XVEGMN(I,J) * 0.01
-          XLAND(I,J)  = 1.0 + FWAT
-          XALB(I,J)   = XALB(I,J) * 0.01
-          XSNOALB(I,J)= XSNOALB(I,J) * 0.01
+          ZNT(I,J)     = ZNT(I,J) * 0.01           !CONVERT TO M
+          XVEG(I,J)    = XVEG(I,J) * 0.01          !CONVERT TO FRAC
+          XVEGMN(I,J)  = XVEGMN(I,J) * 0.01
+          XLAND(I,J)   = 1.0 + FWAT
+          XALB(I,J)    = XALB(I,J) * 0.01
+          XSNOALB(I,J) = XSNOALB(I,J) * 0.01
         
           !-------Adjustment according to CANFRA and IMPERV fo NLCD40 only -----------
           FIMP = IMPERV(I,J) * 0.01
           FCAN = CANFRA(I,J) * 0.01
-          IF (LAND_USE_TYPE == 'NLCD40') THEN
-             XVEG(I,J) = MIN(XVEG(I,J),1.0-FIMP)
+          IF (LAND_USE_TYPE == 'NLCD40'.or.LAND_USE_TYPE == 'NLCD51') THEN
+             XVEG(I,J)   = MIN(XVEG(I,J),1.0-FIMP)
              XVEGMN(I,J) = MIN(XVEGMN(I,J),1.0-FIMP)
-             XVEG(I,J) = MAX(XVEG(I,J),FCAN)
+             XVEG(I,J)   = MAX(XVEG(I,J),FCAN)
              XVEGMN(I,J) = MAX(XVEGMN(I,J),FCAN)
            
              FORFRA = LANDUSEF(I,39,J)+LANDUSEF(I,30,J)+LANDUSEF(I,29,J)+LANDUSEF(I,28,J)
              EXTFOR =  FCAN - FORFRA
              IF (EXTFOR.GE.0.01) THEN
-                XLAI(I,J) = LAIMX(30) * EXTFOR + XLAI(I,J) * (1-EXTFOR)
-                XLAIMN(I,J) = LAIMN(30) * EXTFOR + XLAIMN(I,J) * (1-EXTFOR)
+                XLAI(I,J)   = LAIMX(30) * EXTFOR + XLAI(I,J) * (1 - EXTFOR)
+                XLAIMN(I,J) = LAIMN(30) * EXTFOR + XLAIMN(I,J) * (1 - EXTFOR)
              ENDIF
           ENDIF
           !--------------------------------------------------------------------------
-
+          IF(XLAND(I,J).GT.1.5) URBF2D(I,J) = -1.   ! set urban frac to -1 for water
         ENDDO     ! END LOOP THROUGH GRID CELLS
       ENDDO       ! END LOOP THROUGH GRID CELLS
       !--------------------------------------------------------------------
@@ -1056,16 +1375,33 @@ CONTAINS
 
 !------------------------------------------------------------------------------
 !------------------------------------------------------------------------------
-      SUBROUTINE SURFPX(DTPBL, IFLAND, ISNOW, NUDGEX, XICE1, SOLDN, GSW,     & !in
-                        LWDN, EMISSI, Z1, MOL, ZNT, UST, PSURF, DENS1,       & !in
-                        QV1, QSS, TA1, THETA1, PRECIP, CPAIR, PSIH,          & !in
-                        RH2OBS, T2OBS, VEGFRC, ISTI,LAI,IMPERV,CANFRA,BETAP, & !in
-                        RSTMIN, HC_SNOW, SNOW_FRA, WETFRA, WWLT, WFC,        & !in
-                        WRES, CGSAT, WSAT, B, C1SAT, C2R, AS, JP, C3, DS1,   & !in 
-                        DS2, QST12,                                          & !in
-                        RADNET, GRDFLX, HFX, QFX, LH, EG, ER, ETR,           & !out
-                        QST, CAPG, RS, RA, TG, T2, WG, W2, WR,               & !out
-                        TA2, QA2, LAND_USE_TYPE, I, J )                        !out
+      SUBROUTINE SURFPX(ITIMESTEP,DTPBL, ISPXURB, IFLAND, ISNOW, NUDGEX, XICE1,                & !in
+                        JULIAN, XTIME, GMT, SOLDN, GSW, LWDN, EMISSI, Z1,            & !in
+                        MOL, ZNT, UST, ZA_CNP2, ZA_CNP1, ZF_CNP1, ZF_CNP0, DZF,      & !in UTK Urban
+                        PSURF, DENS1, DENSRF,                                        & !in UTK Urban
+                        QV1, QV_RF, QSS, QSS_RF, TA1, TA_RF,                         & !in UTK Urban
+                        THETA1, THETA_RF, PRECIP, THETAV_RF, THETA_RF1, THETAV_RF1,  & !in UTK Urban
+                        THETA_RFs, THETAV_RFs, THETA_WLs, CPAIR, CPAIR_RF, PSIH,     & !in UTK Urban
+                        US_RF1, US_RF, VS_RF1, VS_RF,                           & !in UTK Urban
+                        DENS_CAN, THETA_CAN, TA_CAN, WSP_CAN, CPAIR_CAN,        & !in UTK Urban
+                        RH2OBS, T2OBS,                                          & !in
+                        VEGFRC, ISTI, LAI, IMPERV, CANFRA,                      & !in
+                        BETAP, RSTMIN, HC_SNOW, SNOW_FRA, WETFRA,               & !in
+                        WWLT, WFC, WRES, CGSAT, WSAT, B,                        & !in
+                        C1SAT, C2R, AS, JP, C3, DS1, DS2, QST12,                & !in
+                        URBF, COSZ, CURR_SECS, ALB,                             & !-- DDY and UTK Urban in
+                        XLATIJ, XLONIJ, SINAIJ, COSAIJ,                         & !in --Urban
+                        RADNET, GRDFLX, HFX, QFX, LH,                           & !out
+                        HFX_RF, HFX_WL, ANTHFX1, ANTHFX_RF, QFX_RF, LH_RF,      & !out UTK Urban
+                        EG, ER, ETR, ER_ST, ER_RF,                              & !out UTK Urban
+                        QST, CAPG, RS, RA, TG, T2, TG_RF, T2_RF, TG_WL, T2_WL,  &
+                        RADWL, RADWL_FNL, RADST, RADST_FNL, GSW_URB, GSW_WL,    & !out UTK Urban
+                        RADNET_URB, RADNET_RF, RADNET_WL, LWDN_URB, LWDN_RF,    & !out UTK Urban
+                        LWDN_WL, LWUP_URB, LWUP_RF, LWUP_WL,                    & !out UTK Urban  
+                        WG, W2, WR, WR_ST, WR_VEG, WR_RF,                       & !out
+                        TA2, QA2, LAND_USE_TYPE, I, J,                          & !out
+                        HGTBDG, LAMP, LAMF, STDIR1, STDIR2, BB1, BB2,           & !-- UTK Urban in
+                        PPLN, VEGU,KSL, SWDDIR, SWDDIF,GAB_RF,GAB_WL            ) !-- UTK Urban in
 
 !------------------------------------------------------------------------------
 ! 
@@ -1134,7 +1470,17 @@ CONTAINS
 !    WR:     Canopy water content in m
 !
 !  REVISION HISTORY:
-!     AX     2/2005 - developed WRF version based on the MM5 PX LSM
+!     AX     02/2005 - developed WRF version based on the MM5 PX LSM
+!   
+!     UTK    05/2018 - Estimation of Urban ground+rooftop surface temperatures and heat fluxes.
+!                    - Estimation of evaporation rate from the urban surfaces and corresponding 
+!                      moisture fluxes during the precipitation events.
+!                    - Estimation of anthropogenic heat fluxes from the buildings based upon 
+!                      the heating degree days and cooling degree days approach. 
+!
+!     UTK    03/2021 - Incorporation of the complete urban solar radiation model based upon Masson (2000).
+!                    - Estimation of the urban wall surface temperatures and heat fluxes.     
+!
 !
 !------------------------------------------------------------------------------
 !------------------------------------------------------------------------------
@@ -1143,60 +1489,147 @@ CONTAINS
 !.......Arguments
 
 !.. Integer
-      INTEGER , INTENT(IN)  :: ISTI, NUDGEX, I, J
+      INTEGER, INTENT(IN) :: ISTI, NUDGEX, I, J,ITIMESTEP
 
 !... Real
-      REAL ,    INTENT(IN)  :: DTPBL, DS1, DS2
-      REAL ,    INTENT(IN)  :: IFLAND, ISNOW, XICE1
-      REAL ,    INTENT(IN)  :: SOLDN, GSW, LWDN, EMISSI, Z1
-      REAL ,    INTENT(IN)  :: ZNT
-      REAL ,    INTENT(IN)  :: PSURF, DENS1, QV1, QSS, TA1,  THETA1, PRECIP
-      REAL ,    INTENT(IN)  :: CPAIR
-      REAL ,    INTENT(IN)  :: VEGFRC, LAI, IMPERV, CANFRA
-      REAL ,    INTENT(IN)  :: RSTMIN, HC_SNOW, SNOW_FRA, WETFRA 
-      REAL ,    INTENT(IN)  :: WWLT, WFC, WRES, CGSAT, WSAT, B, C1SAT, C2R, AS, JP, C3
-      REAL ,    INTENT(IN)  :: RH2OBS,T2OBS
-      REAL ,    INTENT(IN)  :: QST12
+      REAL, INTENT(IN)    :: DTPBL, DS1, DS2
+      REAL, INTENT(IN)    :: IFLAND, ISNOW, XICE1
+      REAL, INTENT(IN)    :: JULIAN, XTIME, GMT
+      REAL, INTENT(IN)    :: SOLDN, GSW, LWDN, EMISSI, Z1
+      REAL, INTENT(IN)    :: ZNT
+      REAL, INTENT(IN)    :: PSURF, DENS1, QV1, QSS, TA1, THETA1, PRECIP
+      REAL, INTENT(IN)    :: CPAIR, CPAIR_RF
+      REAL, INTENT(IN)    :: VEGFRC, LAI, IMPERV, CANFRA
+      REAL, INTENT(IN)    :: RSTMIN, HC_SNOW, SNOW_FRA, WETFRA 
+      REAL, INTENT(IN)    :: WWLT, WFC, WRES, CGSAT, WSAT, B, C1SAT, C2R, AS, JP, C3
+      REAL, INTENT(IN)    :: RH2OBS, T2OBS
+      REAL, INTENT(IN)    :: QST12
 
-      REAL ,    INTENT(OUT) :: RADNET, EG, ER, ETR
-      REAL ,    INTENT(OUT) :: QST, CAPG, RS, TA2, QA2
+      REAL, INTENT(OUT)   :: EG, ER, ETR
+      REAL, INTENT(OUT)   :: QST, CAPG, RS, TA2, QA2
 
-      REAL ,    INTENT(INOUT) :: TG, T2, WG, W2, WR, UST, RA, BETAP 
-      REAL ,    INTENT(INOUT) :: GRDFLX, QFX, HFX, LH, PSIH, MOL
+      REAL, INTENT(INOUT) :: WG, W2, WR, UST, RA, BETAP , TG
+      DOUBLE PRECISION, INTENT(INOUT) :: T2
+      REAL, INTENT(INOUT) :: GRDFLX, QFX, HFX, LH, PSIH, MOL
 
-      CHARACTER (LEN = 6), INTENT(IN) :: LAND_USE_TYPE      ! Check Limei Ran, wrf38 set to 5
+      CHARACTER (LEN = 6), INTENT(IN) :: LAND_USE_TYPE
+
+      !-- UTK Urban
+      REAL, INTENT(IN)    :: QV_RF, QSS_RF, DENSRF, THETA_RF
+      REAL, INTENT(IN)    :: ZA_CNP2, ZA_CNP1, DZF, TA_RF
+      REAL, INTENT(IN)    :: THETAV_RF, THETA_RF1, THETAV_RF1
+      REAL, INTENT(IN)    :: ZF_CNP1, ZF_CNP0, THETA_RFs, THETAV_RFs, THETA_WLs
+      REAL, INTENT(IN)    :: US_RF1, US_RF, VS_RF1, VS_RF
+      REAL, INTENT(IN)    :: DENS_CAN, THETA_CAN, TA_CAN, WSP_CAN, CPAIR_CAN
+      REAL, INTENT(OUT)   :: ER_ST, ER_RF
+      REAL, INTENT(INOUT) :: WR_ST, WR_VEG, WR_RF
+      REAL, INTENT(INOUT) :: HFX_RF, HFX_WL, ANTHFX1, ANTHFX_RF, QFX_RF, LH_RF
+      REAL, INTENT(INOUT) :: TG_RF, TG_WL
+      DOUBLE PRECISION, INTENT(INOUT) :: T2_RF, T2_WL
+      REAL, INTENT(INOUT) :: RADWL, RADWL_FNL, RADST, RADST_FNL, GSW_URB, GSW_WL
+      REAL, INTENT(INOUT) :: RADNET, RADNET_URB, RADNET_RF
+      REAL, INTENT(INOUT) :: LWDN_URB, LWDN_RF, LWUP_URB, LWUP_RF
+      REAL, INTENT(INOUT) :: RADNET_WL, LWDN_WL, LWUP_WL 
+      REAL, INTENT(OUT)   :: GAB_RF,GAB_WL
+
+      LOGICAL, INTENT(IN) :: ISPXURB
+
 
 !... Local Variables
 
 !... Real
-      REAL        :: HF, LV, CQ4, WETSAT, SM2 
-      REAL        :: RAH, RAW, ET, W2CG, CG, CT, SOILFLX, CPOT, THETAG
-      REAL        :: ZOL, ZOBOL, ZNTOL, Y, Y0, PSIH15, YNT
-      REAL        :: WGNUDG, W2NUDG, ALPH1, ALPH2, BET1, BET2, T1P5
-      REAL        :: CQ1, CQ2, CQ3, COEFFNP1, COEFFN, TSNEW, TSHLF, T2NEW
-      REAL        :: ROFF, WRMAX, PC, DWR, PNET, TENDWR, WRNEW
-      REAL        :: COF1, CFNP1WR, CFNWR, PG, FASS
-      REAL        :: TENDW2, W2NEW, W2HLF, W2REL, C1, C2, WEQ, CFNP1, CFN, WGNEW
-      REAL        :: ALN10, TMP1, TMP2, TMP3, AA, AB, TST, RBH, CTVEG
-      REAL        :: QST1,PHIH,PSIOB
-      REAL        :: T2NUD, T2NUDF
-      REAL        :: VAPPRS, QSBT, RH2MOD, IMF, VEGF, SOILF
-      REAL        :: RSOIL, LDRY, DP       ! Soil model updates - JEP 12/14
-      REAL        :: C1MAX,ZZA,ZZB,ZDEL,ZLY,ZA,ZB,ZY2
-      REAL        :: Rinc, Hcan                           ! JEP 2020
-      REAL        :: CQ3BG,CQ3VW,CQ3VG,SIGG
+      REAL :: HF, LV, CQ4, WETSAT, SM2, LV_RF 
+      REAL :: RAH, RAW, ET, ET_RF, W2CG, CG, CT, CT_RF, CT_WL, SOILFLX
+      REAL :: CPOT, THETAG, THETAG_RF
+      REAL :: ZOL, ZOBOL, ZNTOL, Y, Y0, PSIH15, YNT
+      REAL :: WGNUDG, W2NUDG, ALPH1, ALPH2, BET1, BET2
+      REAL :: CQ1, CQ2, CQ3, COEFFNP1, COEFFN, TSNEW, TSHLF
+      REAL :: CQ1_G, CQ2_G, COEFFNP1_G, COEFFN_G, TSNEW_G, TSHLF_G
+      REAL :: CQ1_RF, CQ2_RF, COEFFNP1_RF, COEFFN_RF, TSNEW_RF, TSHLF_RF 
+      DOUBLE PRECISION ::T2NEW_RF, T2NEW_WL, T2NEW_G, T2NEW, T2U
+      REAL :: COEFFNP1_WL, COEFFN_WL, TSNEW_WL, TSHLF_WL
+      REAL :: ROFF, WRMAX, PC, DWR, PNET, TENDWR, WRNEW
+      REAL :: COF1, CFNP1WR, CFNWR, PG, FASS
+      REAL :: TENDW2, W2NEW, W2HLF, W2REL, C1, C2, WEQ, CFNP1, CFN, WGNEW
+      REAL :: ALN10, TST
+      REAL :: QST1, PHIH, PSIOB
+      REAL :: T2NUD, T2NUDF
+      REAL :: VAPPRS, QSBT, RH2MOD, IMF, VEGF, SOILF
+      REAL :: RSOIL, LDRY, DP
+      REAL :: C1MAX, ZZA, ZZB, ZDEL, ZLY, ZA, ZB, ZY2
+      REAL :: Rinc, Hcan
+      REAL :: CQ3BG, CQ3VW, CQ3VG, SIGG
+
+      !-- DDY and UTK Urban
+      REAL, INTENT(IN) :: URBF, COSZ, XLATIJ, XLONIJ, SINAIJ, COSAIJ, CURR_SECS, ALB
+      REAL :: SXLONG, DA, XT24, TLOCTM, ARGU, CSZA
+      REAL :: WSTT, BBDG, TANZ
+      REAL :: AZMA    ! Solar azimuth angle 
+      REAL :: HRA     ! Hour angle in degrees
+      REAL :: DECLN   ! Declination angle
+      REAL :: RFFA    ! Roof fraction area
+      REAL :: WLFA    ! Wall fraction area
+      REAL :: STVEGFA ! Street + Vegetation fraction area 
+      REAL :: STFA    ! Street fraction area
+      REAL :: VEGFA   ! Vegetation fraction area
+      REAL :: EOT     ! Equation of time in minutes
+      REAL :: RESWL   ! Aerodynamic resistance for walls
+      REAL :: ETAC    ! Eta. coefficient for walls
+
+      REAL :: WRMAX_VEG, WRMAX_ST, WRNEW_VEG, WRNEW_ST
+      REAL :: WRNEW_RF, WRMAX_RF, CQ4_RF, CQ4_ST
+      REAL :: WSP1, AA, BB, WSPD, RIN, FH2
+      REAL :: RZ0RT, CF, FHH2, RBPW
+      REAL :: MR, MW                      ! Sum of the reflections against the road and wall
+      REAL :: RR, RW                      ! Reflected radiation parts from the road and wall
+      REAL :: CON1, CON2, HNX, CNX, GFX   ! For Anthro flux estimation  
+      REAL :: STANGX
+      INTEGER :: IDIR   
+      REAL :: FWALL, RBPW1, RBPW2 
+      REAL :: time
+      integer ihr
+      
+      !-- DDY, UTK Urban morphological parameters
+      REAL, INTENT(IN) :: LAMF            ! Frontal area density
+      REAL, INTENT(IN) :: LAMP            ! Plan area density
+      REAL, INTENT(IN) :: HGTBDG          ! Average building height
+      INTEGER, INTENT(IN) :: STDIR1       ! Dominant street angle (canyon orientation)
+      INTEGER, INTENT(IN) :: STDIR2       ! 2nd Dominant street angle (canyon orientation)
+      REAL, INTENT(INOUT) :: BB1             ! Block width between streets in STDIR1 direction
+      REAL, INTENT(INOUT) :: BB2             ! Block width between streets in STDIR2 direction
+      REAL, INTENT(IN) :: PPLN            ! Population density  
+      REAL, INTENT(IN) :: VEGU            ! veg frac in Urban part
+      REAL :: SKVFRD                      ! Sky view factor for canyon road
+      REAL :: SKVFWL                      ! Sky view factor for canyon one wall
+      REAL, PARAMETER :: RDALB = 0.2      ! Albedo for the concrete road surface
+      REAL, PARAMETER :: WLALB = 0.4      ! Albedo for the concrete building wall surface
+      REAL, PARAMETER :: SNALB = 0.8      ! Albedo for the snow covered surface
+      REAL, PARAMETER :: RDEMISSI = 0.9   ! Emissivity for the concrete road surface 
+      REAL, PARAMETER :: WLEMISSI = 0.9   ! Emissivity for the concrete building wall surface
+      REAL, PARAMETER :: RFEMISSI = 0.9   ! Emissivity for the concrete building roof surface
+      REAL, PARAMETER :: SNEMISSI = 0.99  ! Emissivity for the snow surface      
+      INTEGER, INTENT(IN) :: KSL          ! Urban canopy level K-index 
+      REAL, INTENT(IN) :: SWDDIR          ! Direct SW radiation from goddard scheme
+      REAL, INTENT(IN) :: SWDDIF          ! Diffused SW radiation from goddard scheme
+
 
 !... Parameters
-      REAL        :: ZOBS, GAMAH, BETAH, SIGF, BH, CT_SNOW, CT_IMPERV
+      REAL :: ZOBS, GAMAH, BETAH, SIGF, BH, CT_SNOW, CT_IMPERV
+      REAL :: RDEMISSIBR                  ! Emissivity for the road surface together with snow
+      REAL :: RFEMISSIBR                  ! Emissivity for the rooftop surface together with snow
+      REAL :: RDALBBR                     ! Albedo for for the road surface together with snow
+      REAL :: TGU
+      REAL :: SWDIFRD, SWDIFWL, CHWL
 
       REAL, PARAMETER :: CV = 1.2E-5   ! K-M2/J Note: Update from 8E-6 10/14 Jon Pleim
 
       PARAMETER (ZOBS  = 1.5)    ! height for observed screen temp., (m)
       PARAMETER (BH    = 15.7)
-      PARAMETER (GAMAH = 16. )   !11.6)
-      PARAMETER (BETAH = 5.0 )   !8.21)
+      PARAMETER (GAMAH = 16.)    !11.6)
+      PARAMETER (BETAH = 5.0)    !8.21)
       PARAMETER (SIGF  = 0.5)    ! rain interception see LSM (can be 0-1)
       REAL, PARAMETER  :: DWAT   = 0.2178  ! [cm^2 / s] at 273.15K
+
       !--------------------------------------------------------------------
       !  OLD PX legacy value from MM5 ... unknown origin PARAMETER (CT_SNOW  = 5.54E-5)   
       ! New value of CT_SNOW calibrated using multilayer soil model where csnow=6.9E5 J/(m3 K) 
@@ -1224,15 +1657,60 @@ CONTAINS
       PARAMETER (CT_IMPERV  = 3.268E-6)  
       !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
+      !---UTK Urban
+      REAL, PARAMETER :: CT_STREET = 3.268E-6            !--UTK Urban (******CHANGE IT******)
+      REAL, PARAMETER :: SIGFF     = 0.7                 ! Rain interception for the street
+      REAL, PARAMETER :: CT_ROOF   = 8.6E-6   ! 3.268E-6 
+      REAL, PARAMETER :: CT_WALL   = 6.7E-6   ! 3.268E-6
+      REAL, PARAMETER :: B1        = 9.4
+      REAL, PARAMETER :: B2        = B1/2.
+      REAL, PARAMETER :: CSTH      = 5.3
+      REAL, PARAMETER :: Z0RT      = 0.05                ! Building roof roughness length (m)
+      REAL, PARAMETER :: KARMAN    = 0.4 
+      REAL, PARAMETER :: PPLNNYC   = 10430.   ! NYC pop den Sailor et al 2015
+      REAL, PARAMETER :: Qfmax     = 63.      ! NYC
+      REAL, PARAMETER :: Fveh      = 0.39
+      REAL, DIMENSION(24) :: ProHr    ! Summer
+      DATA PROHR/0.25,0.23,0.25,0.21,0.22,0.29,0.53,0.82,0.87,0.80,0.80,0.84,    &
+                 0.89,0.89,0.93,1.00,0.90,0.78,0.56,0.48,0.44,0.41,0.36,0.30/ 
+      REAL ProFac,LHR
+      INTEGER LastHr, NextHr
+      REAL BW1,BW2
+
+!---------------------------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------------------------
+
         ALN10  = ALOG(10.0)
-        RADNET = SOLDN - (EMISSI *(STBOLT *TG **4 - LWDN))        ! NET RADIATION                             
-        !--------------------------------------------------------------------
-        CPOT= (100.0 / PSURF) ** ROVCP       ! rcp is global constant(module_model_constants)                            
+        RADNET = GSW - (EMISSI *(STBOLT *TG **4 - LWDN)) ! NET RADIATION (Only a diagnostic term and not used in model further)
+
+        CPOT   = (100.0 / PSURF) ** ROVCP                ! rcp is global constant(module_model_constants)
         THETAG = TG * CPOT
 
-        ZOL   = Z1/MOL                                                       
-        ZOBOL = ZOBS/MOL                                                      
-        ZNTOL = ZNT/MOL                              
+        IF (ISPXURB .AND. (URBF .GT. 0.0)) THEN
+          THETAG_RF = TG_RF * CPOT
+        ENDIF
+
+        ZOL   = Z1 / MOL                                                       
+        ZOBOL = ZOBS / MOL                                                      
+        ZNTOL = ZNT / MOL                              
+        RZ0RT = 1.0 / Z0RT
+
+
+        IF (ISPXURB .AND. (URBF .GT. 0.0)) THEN
+          !-- Building (Urban Morphology) Parameters 
+!         BBDG = 60. !(LAMP / LAMF) * HGTBDG                 ! Indv. Building Width
+!          WSTT = (1.0 / SQRT(LAMP) - 1.0) * BBDG        ! Indv. Street Width
+!          WSTT = MIN(WSTT, 40.)                         ! max street width
+!          WSTT = MAX(WSTT, 10.)                         ! min street width
+          WSTT = 20.0
+          BW1 = max(BB1-WSTT,10.)
+          BW2 = max(BB2-WSTT,10.)
+!          RBPW = 1.0 / (BBDG + WSTT)     
+          RBPW1   = 1.0 / (BW1 + WSTT)
+          RBPW2   = 1.0 / (BW2 + WSTT)    
+!         RBPW = 1.0 / (BBDG + WSTT)
+        ENDIF
+
 
         !-----------------------------------------------------------------------------------------
         IF (MOL .LT. 0.0) THEN
@@ -1261,29 +1739,46 @@ CONTAINS
             PHIH = BETAH + ZOL
           ENDIF
         ENDIF
+
         !-----------------------------------------------------------------------------------------
         !-- ADD RA AND RB FOR HEAT AND MOISTURE
         !... RB FOR HEAT = 5 /UST
         !... RB FOR WATER VAPOR =  5*(0.599/0.709)^2/3 /UST = 4.503/UST
-        RA=PR0* ( ALOG(Z1/ZNT) - PSIH )/(KARMAN*UST)
+        RA  = PR0 * ( ALOG(Z1 / ZNT) - PSIH ) / (KARMAN*UST)
         RAH = RA + 5.0 / UST
         RAW = RA + 4.503 / UST
         IF (IFLAND .LT. 1.5.AND. XICE1.LT.0.5) THEN
-          LDRY = 1.75*DS1*(EXP((1.-WG/WSAT)**5)-1.)/1.718       ! 1.75 cm is the layer thickness used by S&Z09
-          DP  = DWAT*1.E-4 * WSAT**2 * (1.-WRES/WSAT)**(2.+3./B)
-          RSOIL=LDRY/DP
-
+          LDRY  = 1.75 * DS1 * (EXP((1. - WG/WSAT)**5) - 1.)/1.718  ! 1.75 cm is the layer thickness used by S&Z09
+          DP    = DWAT * 1.E-4 * WSAT**2 * (1. - WRES/WSAT)**(2. + 3./B)
+          RSOIL = LDRY / DP
         ELSE
           RSOIL = 0.0
         ENDIF
+
         !--------------------------------------------------------------------
         ! Compute soil moisture layer 2 that considers fraction of saturated 
         ! wetlands. If 100% of cell is wetland, soil moisture can be no lower
         ! than full soil saturation. If half wetland, no less than half saturated 
-        IF (IFLAND .LT. 1.5 ) THEN
+        IF (IFLAND .LT. 1.5) THEN
           WETSAT = 1.00 * WSAT                           ! Wetlands soil moisture
           SM2    = (WETFRA * WETSAT)                     ! 
           W2     = AMAX1(SM2, W2)                        ! In case that W2 > Field capacity (heavy precip), use wetter W2
+        ENDIF
+
+        !--------------------------------------------------------------------------
+        !--Computation of Roof fraction, street fraction and Veg fraction area for
+        !---an urban grid cell
+        !-------------------------------------------
+        ! The street fraction area is calculated by subtracting urban plan area index from 1.0.
+        ! And consequently, the vegetation fraction area and soil fraction area are obtained too.
+        IF (ISPXURB .AND. (URBF .GT. 0.0)) THEN  
+          RFFA    = LAMP
+!          STVEGFA = 1.0 - LAMP
+!          VEGFA   = VEGFRC
+!          STFA    = 1.0 - VEGFA
+          VEGFA   = VEGU
+          STFA    = MAX(1.0 - LAMP - VEGU,0.0)
+!          WLFA    = LAMF          
         ENDIF
 
         !--------------------------------------------------------------------
@@ -1293,32 +1788,167 @@ CONTAINS
 
         !--------------------------------------------------------------------
         !--  COMPUTE MOISTURE FLUX
-        CALL QFLUX( DENS1,  QV1,    TA1,  SOLDN,  RAW, QSS,            &
-                    VEGFRC, ISNOW,  ISTI, IFLAND, LAI, BETAP,          &
-                    WG,     W2,     WR,                                &
-                    RSTMIN, WWLT, WFC, RSOIL, RINC,                    &     
-                    EG,     ER,     ETR,  CQ4,    RS,  FASS, SIGG)
+        CALL QFLUX(URBF, DTPBL, ISPXURB, DENS1, DENSRF,                   &
+                   QV1, QV_RF, TA1, SOLDN, RAW, QSS, QSS_RF,              &
+                   VEGFRC, ISNOW,  ISTI, IFLAND, LAI, BETAP,              &
+                   WG, W2, WR, WR_ST, WR_VEG, WR_RF, STFA, VEGFA, RFFA,   &
+                   RSTMIN, WWLT, WFC, RSOIL, RINC, SIGG,                  &
+                   EG, ER, ETR, ER_ST, ER_RF,                             &
+                   CQ4, CQ4_RF, CQ4_ST, RS, FASS                          )
         !--------------------------------------------------------------------
 
         !--------------------------------------------------------------------
         !    Compute Total evaporation (ET) from various modes of moisture flux
-        ET  = EG + ER + ETR
+        !-----From Urban-veg grid in D4
+        IF (ISPXURB .AND. (URBF .GT. 0.0)) THEN
+          ET    = EG*(1-IMPERV*0.01) + ER_ST + ER + ETR
+          ET_RF = ER_RF
+        ELSE  
+          !-----(Default PX)
+          ET  = EG*(1-IMPERV*0.01) + ER + ETR
+        ENDIF
+
         QST = -ET / (DENS1 * UST)
  
-        LV  = 2.83E6                         !-- LATENT HEAT OF SUBLIMATION AT 0C FROM STULL(1988)
-        IF (ISNOW .LT. 0.5.AND.TG.GT.273.15)                            &                                                                               
+        LV  = 2.83E6                        !-- LATENT HEAT OF SUBLIMATION AT 0C FROM STULL(1988)
+        IF ((ISNOW .LT. 0.5) .AND. (TG .GT. 273.15))                            &
                     LV = (2.501 - 0.00237 * (TG - 273.15)) * 1.E6  !-- FROM STULL(1988) in J/KG
         
         QFX = ET
-        LH  = LV * QFX
+        LH  = LV * QFX                      !-- latent heat flux
+
+
+        IF (ISPXURB .AND. (URBF .GT. 0.0)) THEN
+          LV_RF  = (2.501 - 0.00237 * (TG_RF - 273.15)) * 1.E6         !-- FROM STULL(1988) in J/KG
+          QFX_RF = ET_RF                                 
+          LH_RF  = LV_RF * QFX_RF           !-- latent heat flux at roof  
+        ENDIF
         !-----------------------------------------------------------------------------------------
 
+
         !-----------------------------------------------------------------------------------------
-        ! Surface sensible heat flux
+        ! Anthropogenic Heat Flux Estimation from Urban Grid Cells ---------------
+        !----------------------------------------------------------------------------------------
+        IF (ISPXURB .AND. (URBF .GT. 0.0)) THEN
+        ! This HRA calculation is based on subroutine calc_coszen in module_radiation_driver.F
+           DA     = 6.2831853071795862 * (JULIAN-1)/365.
+           EOT    = (0.000075 + 0.001868 * COS(DA) - 0.032077 * SIN(DA) &
+                    -0.014615 * COS(2*DA) - 0.04089 * SIN(2*DA)) * (229.18)
+           XT24   = MOD(XTIME,1440.) + EOT
+           TLOCTM = GMT + XT24/60. + XLONIJ/15.
+           HRA    = 15. * (TLOCTM - 12.)   ! Hour angle in degrees
+
+        !-----------------------------------------------------------------------------------------
+        ! Anthropogenic Heat Flux Estimation from Urban Grid Cells ---------------
+        !  References: Sailor et al. 2015
+        !----------------------------------------------------------------------------------------
+          ANTHFX1   = 0.0
+          ANTHFX_RF = 0.0
+          if(TLOCTM.lt.1.0) then
+            LHR = TLOCTM + 24.
+          else
+            LHR = TLOCTM
+          endif
+          LastHr = int(LHR) 
+          NextHr = LastHr + 1
+          IF(LHR.LT.24.) Then
+            ProFac = ProHr(LastHr) + (LHR-float(LastHr)) * (ProHr(NextHr)-ProHr(LastHr))
+          ELSE 
+            ProFac = ProHr(24) + (LHR-24.) * (ProHr(1)-ProHr(24))
+          ENDIF
+          ANTHFX1   =   0.5* (PPLN / PPLNNYC * (1.-Fveh) +  Fveh) * ProFac * Qfmax
+          ANTHFX_RF = ANTHFX1
+!          if(HGTBDG.gt.120.0) then
+!             print *,' LHR,ProFac,PPLN,ANTHFX1=',LHR,ProFac,PPLN,ANTHFX1
+!          endif
+        ENDIF
+
+
+        !-----------------------------------------------------------------------------------------
+        ! Surface Sensible Heat Flux  ( for Urban/Non-Urban ) ------------------------
+        !-----------------------------------------------------------------------------------------
         TST = (THETA1 - THETAG ) / (UST*RAH)
         HF  = UST * TST           
-        HFX = AMAX1(-DENS1 * CPAIR * HF, -250.0)  ! using -250. from MM5                                   
+
+        GFX = 0.0
+        HFX = 0.0 
+        IF (ISPXURB .AND. (URBF .GT. 0.0)) THEN       ! Urban Ground Heat Flux Estimation 
+           GFX = AMAX1(-DENS1 * CPAIR * HF, -250.0)  
+           HFX = GFX + ANTHFX1 * URBF   ! using -250. from MM5                   !-- UTK Urban 
+        ELSE    ! Non-Urban Ground Heat Flux           
+           HFX = AMAX1(-DENS1 * CPAIR * HF, -250.0)   ! using -250. from MM5
+        ENDIF
+
+
         !-----------------------------------------------------------------------------------------
+        ! Urban Rooftop Heat Flux Estimation ----------------------------
+        !-----------------------------------------------------------------------------------------
+        HFX_RF = 0.0 
+        GAB_RF = 0.0
+        IF (ISPXURB .AND. (URBF .GT. 0.0)) THEN  
+           !-- Richardson Number Estimation 
+           WSP1 = MAX(SQRT(US_RF**2 + VS_RF**2), 0.01)
+           AA   = THETAV_RF1 - THETAV_RF
+!           AA   = THETAV_RF - THETAV_RFs
+           BB   = 2 * 9.81 / (THETAV_RF1 + THETAV_RF) 
+!           BB   = 9.81 / THETAV_RFs
+
+           WSPD = (US_RF1 - US_RF)**2 + (VS_RF1 - VS_RF)**2      
+           WSPD = MAX(WSPD,0.1)
+           RIN  = ABS(ZA_CNP2 - ZA_CNP1) * AA * BB / WSPD
+
+           !-- Determination of Stability conditions for (Louis,1979) functions FH 
+           IF (RIN .GE. 0.0) THEN
+             !- Stable condition
+             AA  = 1.0 + B2 * RIN
+             AA  = AA * AA
+             FH2 = 1.0 / AA
+           ELSE
+             !- Unstable condition
+             AA  = DZF * 0.5 * RZ0RT
+             BB  = KARMAN / LOG(AA)
+             CF  = BB * BB * B1 * SQRT(AA)
+             AA  = B1 * RIN
+             BB  = CF * SQRT(-RIN)
+             FH2 = 1.0 - AA / (1.0 + CSTH * BB)
+           ENDIF
+
+           !-- Urban Rooftop heat flux estimation (Martilli et al.,2002)
+           AA   = KARMAN / LOG(DZF * 0.5 * RZ0RT)
+           AA   = AA * AA * WSP1
+           FHH2 = AA * FH2 / 0.74 
+           GAB_RF = FHH2 * URBF * RFFA   ! m/s
+           HFX_RF = - DENSRF * CPAIR_RF * GAB_RF * (TA_RF - TG_RF) + ANTHFX_RF *URBF   !-- UTK Urban 
+        ENDIF  
+
+
+        !-----------------------------------------------------------------------------------------
+        ! Urban Wall Heat Flux Estimation ----------------------------
+        !-----------------------------------------------------------------------------------------
+        RESWL  = 0.0
+        ETAC   = 0.0
+        HFX_WL = 0.0
+        GAB_WL = 0.0
+        IF (ISPXURB .AND. (URBF .GT. 0.0)) THEN
+           ! Forced convection coefficient for walls [Wm^-2/deg.K] (Clarke,1985)
+           ETAC   = 5.678*(1.09 + 0.23*(WSP_CAN/0.3048))
+!           CHWL   = WSP_CAN * DENS_CAN*CPAIR_CAN/ 35.   ! Ra+Rb = 35./U where Zo=0.1
+           ! Urban Walls heat flux estimation (Martilli et al.,2002)
+           Fwall = 2. * HGTBDG * ((RBPW2+RBPW1) - WSTT*RBPW2*RBPW1)/(1-lamp)
+           GAB_WL = ETAC * URBF * Fwall 
+           HFX_WL = - GAB_WL * (THETA_CAN - THETA_WLs)                  !-- UTK Urban
+           GAB_WL = GAB_WL / (DENS_CAN* CPAIR_CAN) 
+            time = itimestep*dtpbl  !s
+            ihr = mod(int(time),3600)
+!           if(HGTBDG.gt.120.0.and.ihr.eq.0) then
+!                print *,'FWALL,URBF,RFFA=',FWALL,URBF,RFFA
+!                print *,'HGTBDG,time,GAB_WL,GAB_RF=',HGTBDG,time,GAB_WL,GAB_RF,wsp_can
+!           endif
+!           HFX_WL = - CHWL * (THETA_CAN - THETA_WLs) * URBF * (2*HGTBDG/WSTT) 
+!           IF(HGTBDG.GT.40.0.AND.SWDDIR.GT.200.)print*,' ETAC,CHWL,FHH2=',ETAC,CHWL,FHH2
+        ENDIF 
+        !-----------------------------------------------------------------------------------------
+
 
         !-----------------------------------------------------------------------------------------
         ! Compute the diagnosed 2m Q and T consistent with PX LSM
@@ -1333,27 +1963,56 @@ CONTAINS
         QSBT   = EP_2 * VAPPRS / (PSURF - VAPPRS)
         RH2MOD = QA2 / QSBT
         !-----------------------------------------------------------------------------------------
-        IF (IFLAND .LT. 1.5 ) THEN
+
+        !-----------------------------------------------------------------------------------------
+        !-----ESTIMATION OF CT, CAPG, GRDFLX for Urban grid cell-----------   !---UTK Urban
+        CT    = 0.0
+        CT_RF = 0.0
+        CT_WL = 0.0
+        IF (ISPXURB .AND. (URBF .GT. 0.0)) THEN
+!          CT    = 1./(STFA/CT_STREET + VEGFA/CV)
+!          CT    = 1./(SNOW_FRA/CT_SNOW + (1-SNOW_FRA)/CT)
+!          CAPG  = 1.0/CT 
+
+          CT_RF = CT_ROOF
+          CT_RF = 1./(SNOW_FRA/CT_SNOW + (1-SNOW_FRA)/CT_RF)
+ 
+          CT_WL = CT_WALL
+
+          RDEMISSIBR = (1.0-SNOW_FRA)*RDEMISSI + SNOW_FRA*SNEMISSI
+          RFEMISSIBR = (1.0-SNOW_FRA)*RFEMISSI + SNOW_FRA*SNEMISSI  
+
+          RDALBBR    = (1.0-SNOW_FRA)*RDALB + SNOW_FRA*SNALB          
+
+          SOILFLX    = 2.0 * PI * TAUINV * (TG - T2)     !-- It's just an output, not used  
+!          GRDFLX     = SOILFLX / CT                      !-- It's just an output, not used 
+        ENDIF
+
+        IF (IFLAND .LT. 1.5) THEN
           W2CG = AMAX1(W2,WWLT)
           CG   = CGSAT * 1.0E-6 * (WSAT/ W2CG) **    &  
                  (0.5 * B / ALN10)
           ! IMPERVIOUS weighting scheme -- Subtract highly accurate impervious fraction from cell
           ! remainder is split between ground and vegetation. CT is a weighted fractional average.
           ! Snow CT is then applied for final heat capacity
-          IMF     = AMAX1(0.0,IMPERV/100.0)
-          VEGF    = (1.0 - IMF) * VEGFRC
-          SOILF   = (1.0 - IMF) * (1.0 - VEGFRC)
-          CT      = 1./( IMF/CT_IMPERV + VEGF/CV + SOILF/CG)                        
-          CT      = 1./(SNOW_FRA/CT_SNOW + (1-SNOW_FRA)/CT)
-          CAPG    = 1.0/CT          
-          SOILFLX = 2.0 * PI * TAUINV * (TG - T2)
-          GRDFLX  = SOILFLX / CT
+          IMF   = AMAX1(0.0, IMPERV/100.0)
+          VEGF  = (1.0 - IMF) * VEGFRC
+          SOILF = (1.0 - IMF) * (1.0 - VEGFRC)
+          CT    = 1./( IMF/CT_IMPERV + VEGF/CV + SOILF/CG)                        
+          CT    = 1./(SNOW_FRA/CT_SNOW + (1 - SNOW_FRA)/CT)
+          CAPG  = 1.0/CT          
+
+          SOILFLX = 2.0 * PI * TAUINV * (TG - T2)     !-- It's just an output, not used
+          GRDFLX  = SOILFLX / CT                      !-- It's just an output, not used
         ENDIF
+
         !-----------------------------------------------------------------------------------------
- 
+
         !--------------------------------------------------------------------
         !-- ASSIMILATION --- COMPUTE SOIL MOISTURE NUDGING FROM TA2 and RH2               
         !-------COMPUTE ASSIMILATION COEFFICIENTS FOR ALL I                            
+
+        T2NUD = 0.0
         IF (IFLAND .LT. 1.5) THEN
           IF (NUDGEX .EQ. 0) THEN                                          !-- NO NUDGING CASE                
             WGNUDG = 0.0                                                        
@@ -1376,9 +2035,327 @@ CONTAINS
         ENDIF
         !-----------------------------------------------------------------------------------------
 
+
+        !------------------
+        !-- Initialization
+        !- For Urban Roof
+        CQ1_RF      = 0.0
+        CQ2_RF      = 0.0
+        COEFFNP1_RF = 0.0
+        COEFFN_RF   = 0.0
+        TSNEW_RF    = 0.0
+        TSHLF_RF    = 0.0 
+        T2NEW_RF    = 0.0d0
+
+        !- For Urban Ground
+        CQ1_G       = 0.0
+        CQ2_G       = 0.0
+        COEFFNP1_G  = 0.0
+        COEFFN_G    = 0.0
+        TSNEW_G     = 0.0
+        TSHLF_G     = 0.0
+        T2NEW_G     = 0.0d0
+
+        !- For Urban Walls
+        COEFFNP1_WL = 0.0
+        COEFFN_WL   = 0.0
+        TSNEW_WL    = 0.0
+        TSHLF_WL    = 0.0
+        T2NEW_WL    = 0.0d0
+
+        RADST       = 0.0
+        RADST_FNL   = 0.0
+        GSW_URB     = 0.0            
+        RADWL       = 0.0
+        RADWL_FNL   = 0.0  
+        GSW_WL      = 0.0
+
+        !- Default PX Land
+        CQ1         = 0.0
+        CQ2         = 0.0
+        CQ3         = 0.0
+        COEFFNP1    = 0.0
+        COEFFN      = 0.0
+        TSNEW       = 0.0
+        TSHLF       = 0.0
+        T2NEW       = 0.0d0
+
         !-----------------------------------------------------------------------------------------
         !-- Compute new values for TS,T2,WG,W2 and WR. No change over ice or water (XLAND > 1)
-        IF (IFLAND .LT. 1.5) THEN
+        !-------ESTIMATION of Urban Surface Temperatures----------    !----UTK Urban
+        IF (ISPXURB .AND. (URBF .GT. 0.0)) THEN     ! For Urban Land Surface
+           !-- Computation of Urban Roof Temperature, Solving by CRANK-NIC Implicit method:
+           !-- TENDTS=CT*(RADNET-HFX-QFX)
+           !-- Calculate the coefficients for implicit calculation of ROOF TEMP.
+           CQ1_RF      = (1.0 - 0.622 * LV_RF * CRANKP / (r_d * TG_RF)) * QSS_RF
+           CQ2_RF      = 0.622 * LV_RF * QSS_RF * CRANKP / (r_d * TG_RF * TG_RF)
+
+
+           COEFFNP1_RF = 1.0 + DTPBL * CRANKP * (4.0 * RFEMISSIBR * STBOLT * TG_RF ** 3   &
+                        * CT_RF + DENSRF * CPAIR_RF * FHH2 * CT_RF + 2.0 * PI             &
+                        * TAUINV) + DTPBL * (CT_RF * LV_RF * CQ2_RF * CQ4_RF)
+
+           COEFFN_RF   = CT_RF * (GSW + RFEMISSIBR * (STBOLT * (4.0 * CRANKP - 1.0)       &
+                        * TG_RF*TG_RF*TG_RF*TG_RF + LWDN)                                 & !NET RAD
+                        + DENSRF * CPAIR_RF * FHH2 * (TA_RF - (1.0 - CRANKP) * TG_RF)     &
+                        - LV_RF * (CQ4_RF * (CQ1_RF - QV_RF)))                            & !SFC HEAT FLUX 
+                        - 2.0 * PI * TAUINV * ((1.0 - CRANKP) * TG_RF - T2_RF)  
+
+
+           TSNEW_RF    = (TG_RF + DTPBL * COEFFN_RF) / COEFFNP1_RF
+           !-- FOR SNOW COVERED SURFACE TEMPERATURE IS NOT MORE THAN ZERO
+           IF (XICE1 .GT. 0.5) TSNEW_RF = AMIN1(TSNEW_RF,273.15)                          ! Re-added Jan 2010 to keep ice surface at or below freezing (J. Pleim)
+           TSHLF_RF = 0.5 * (TSNEW_RF + TG_RF)
+           T2NEW_RF = (T2_RF + DBLE(DTPBL) * TAUINV * T2TFACU * (TSHLF_RF - (1 - CRANKP) * T2_RF)   &
+                    + DTPBL*T2NUD)  &              ! Added deep temperature nudging 
+                    / (1.0 + DBLE(DTPBL) * TAUINV * T2TFACU * CRANKP)
+           !-- REPLACE OLD with NEW Value
+           TG_RF = TSNEW_RF
+           T2_RF = T2NEW_RF
+
+           !-- Diagnostic Outputs
+           LWDN_RF   = RFEMISSIBR * LWDN 
+           LWUP_RF   = RFEMISSIBR * STBOLT * (TG_RF**4)
+           RADNET_RF = GSW - (RFEMISSIBR * (STBOLT * (TG_RF**4) - LWDN))   
+ 
+
+
+           !--------------------------------------------------------------------------------------------------------------
+           !-- UTK Urban, correction of shortwave radiation that reaches urban ground and wall surface (Radiation Model)
+           !--------------------------------------------------------------------------------------------------------------
+
+           !-- Urban morphology parameters estimation 
+!           BBDG   = (LAMP / LAMF) * HGTBDG
+!           WSTT   = (1.0 / SQRT(LAMP) - 1.0) * BBDG
+           SKVFRD = SQRT((HGTBDG/WSTT)**2 + 1.0) - (HGTBDG/WSTT) 
+           SKVFWL = 0.5*( (HGTBDG/WSTT) + 1.0 - SQRT((HGTBDG/WSTT)**2 + 1.0) ) / (HGTBDG/WSTT)
+
+           !-- Initialize 
+           RADST     = 0.0
+           RADST_FNL = 0.0
+           GSW_URB   = 0.0 
+           RR        = 0.0
+           MW        = 0.0
+           
+           RADWL     = 0.0
+           RADWL_FNL = 0.0  
+           GSW_WL    = 0.0
+           RW        = 0.0
+           MR        = 0.0 
+
+           DECLN = 0.0
+           EOT   = 0.0
+!           HRA   = 0.0 
+           AZMA  = 0.0
+
+           IF (SOLDN .GT. 0.0 .AND. COSZ .GT. 0.001) THEN               
+              TANZ = ABS((SQRT(1.0-COSZ*COSZ))/COSZ)
+
+              ! This DECLN calculation is based on subroutine radconst in module_radiation_driver.F
+              IF (JULIAN .GE. 80.) THEN
+                 SXLONG = DPD * (JULIAN - 80.)
+              ELSE              
+                 SXLONG = DPD * (JULIAN + 285.)
+              ENDIF
+              DECLN = ASIND(SIND(23.45)*SIND(SXLONG))   ! Declination angle in degrees
+
+
+              ! This AZMA calculation is based on subroutine toposhad in module_radiation_driver.F
+              CSZA = SIND(XLATIJ) * SIND(DECLN) + COSD(XLATIJ) * COSD(DECLN) * COSD(HRA)
+              ARGU = (CSZA * SIND(XLATIJ) - SIND(DECLN)) / (SIN(ACOS(CSZA))*COSD(XLATIJ))
+              IF (ARGU .GT. 1.) ARGU = 1.
+              IF (ARGU .LT. -1.) ARGU = -1.
+              AZMA = SIGN(ACOS(ARGU),SIND(HRA)) + PI  ! azimuth angle of the sun
+              IF (COSAIJ .GE. 0.) THEN
+                 AZMA = AZMA + ASIN(SINAIJ)    ! rotation towards WRF grid 
+              ELSE
+                 AZMA = AZMA + PI - ASIN(SINAIJ)
+              ENDIF
+              AZMA = AZMA * RADDEG    ! Solar azimuth angle in degrees 
+               
+              IF (HRA .GT. 0.0) AZMA = 360.0-AZMA
+             RADST = 0.0
+             RADWL = 0.0
+             DO idir=1,2   ! 2 street dir
+             IF(idir.eq.1) Then
+                STANGX = float(STDIR1)
+             Else
+                STANGX = float(STDIR2)
+                if (STANGX .GT. 360.0) STANGX = STANGX - 360.
+             EndIf
+              IF (HRA .LE. 0.0) THEN       ! Morning hours   
+                IF (STANGX .GE. 0.0 .AND. STANGX .LE. 180.0) THEN
+                  IF ( TANZ .LT. (WSTT/(ABS(SIND(STANGX-AZMA))*HGTBDG)) )THEN    ! Radiation reaching on streets
+                    RADST = RADST +SWDDIR*(1.0 - (HGTBDG/WSTT)*TANZ*ABS(SIND(STANGX-AZMA)))        ! Direct solar flux received by the road
+                    RADWL = RADWL +SWDDIR*(0.5*TANZ*ABS(SIND(STANGX-AZMA)))                        ! Direct solar flux received by the walls
+                  ELSE 
+                    RADST = RADST +0.0
+                    RADWL = RADWL +SWDDIR*(0.5*(WSTT/HGTBDG))
+                  ENDIF
+                ENDIF
+
+                IF (STANGX .GT. 180.0 .AND. STANGX .LE. 360.0) THEN
+                  IF ( TANZ .LT. (WSTT/(ABS(SIND(ABS(180.0-STANGX)-AZMA))*HGTBDG)) )THEN  
+                    RADST = RADST +SWDDIR*(1.0 - (HGTBDG/WSTT)*TANZ*ABS(SIND(ABS(180.0-STANGX)-AZMA)))
+                    RADWL = RADWL +SWDDIR*(0.5*TANZ*ABS(SIND(ABS(180.0-STANGX)-AZMA)))
+                  ELSE 
+                    RADST = RADST +0.0
+                    RADWL = RADWL +SWDDIR*(0.5*(WSTT/HGTBDG))      
+                  ENDIF
+                ENDIF
+
+              ELSE IF (HRA .GT. 0.0) THEN  ! Afternoon hours 
+                IF (STANGX .GE. 0.0 .AND. STANGX .LE. 180.0) THEN
+                  IF ( TANZ .LT. (WSTT/(ABS(SIND(ABS(180.0+STANGX)-AZMA))*HGTBDG)) )THEN                 
+                    RADST = RADST +SWDDIR*(1.0 - (HGTBDG/WSTT)*TANZ*ABS(SIND(ABS(180.0+STANGX)-AZMA)))
+                    RADWL = RADWL +SWDDIR*(0.5*TANZ*ABS(SIND(ABS(180.0+STANGX)-AZMA)))
+                  ELSE
+                    RADST = RADST +0.0
+                    RADWL = RADWL +SWDDIR*(0.5*(WSTT/HGTBDG))
+                  ENDIF
+                ENDIF 
+
+                IF (STANGX .GT. 180.0 .AND. STANGX .LE. 360.0) THEN
+                  IF ( TANZ .LT. (WSTT/(ABS(SIND(STANGX-AZMA))*HGTBDG)) )THEN      
+                    RADST = RADST +SWDDIR*(1.0 - (HGTBDG/WSTT)*TANZ*ABS(SIND(STANGX-AZMA)))
+                    RADWL = RADWL +SWDDIR*(0.5*TANZ*ABS(SIND(STANGX-AZMA)))
+                  ELSE 
+                    RADST = RADST +0.0
+                    RADWL = RADWL +SWDDIR*(0.5*(WSTT/HGTBDG))    
+                  ENDIF    
+                ENDIF 
+              ENDIF 
+!              if(HGTBDG.GT.100.0)print *,' px-HGTBDG,stdir1,BB1',HGTBDG,stdir1,BB1
+             ENDDO       ! 2 street dir
+              RADST = RADST * 0.5
+              RADWL = RADWL * 0.5
+              SWDIFWL = SWDDIF * 2.*SKVFWL     ! diffuse SW x Skyview for 2 walls
+              SWDIFRD = SWDDIF * SKVFRD     ! diffuse SW x Skyview for road
+              RR = (RDALBBR*RADST + RDALBBR*SWDIFRD)                        ! First reflected part from the road            
+              RW = (WLALB*RADWL + WLALB*SWDIFWL)                            ! First reflected part from the wall 
+
+              MW = ( RW + SKVFWL*WLALB*RR ) / ( 1.0 - (1.0 - 2.0*SKVFWL)*WLALB + (1.0 - SKVFRD)*SKVFWL*RDALBBR*WLALB )                                      ! Multiple reflections (infinite times) from the walls 
+              MR = ( RR + (1.0 - SKVFRD)*RDALBBR*(RW + (SKVFWL*WLALB*RR)) ) / ( 1.0 - (1.0 - 2.0*SKVFWL)*WLALB + (1.0 - SKVFRD)*SKVFWL*RDALBBR*WLALB )      ! Multiple reflections (infinite times) from the road
+
+              RADST_FNL = (1.0 - RDALBBR)*RADST + (1.0 - RDALBBR)*SWDIFRD + (1.0 - RDALBBR)*(1.0 - SKVFRD)*MW                                            ! Total SW radiation absorbed by the road surface
+              RADWL_FNL = (1.0 - WLALB)*RADWL + (1.0 - WLALB)*SWDIFWL + (1.0 - WLALB)*(1.0 - 2.0*SKVFWL)*MW + (1.0 - WLALB)*SKVFWL*MR                    ! Total SW radiation absorbed by the walls surface
+
+              GSW_URB = URBF*RADST_FNL + (1.0-URBF)*SOLDN*(1.0-ALB)        ! Total SW radiation absorbed at the ground in an urban grid cell
+              GSW_WL  = RADWL_FNL                                          ! Total SW radiation absorbed at the walls in an urban grid cell
+!            IF(HGTBDG.GT.40.0.AND.SWDDIR.GT.200.)print*,' HGTBDG,SWDDIR=',HGTBDG,SWDDIR,RADWL
+           ENDIF
+
+
+           !------------------------------------------------------------------------------------------
+           !-- Computation of Urban Ground Temperature, Solving by CRANK-NIC Implicit method:
+           !-- TENDTS=CT*(RADNET-HFX-QFX)
+           !-- Calculate the coefficients for implicit calculation of Urban Ground (STREET+VEG) TEMP.
+           CQ1_G      = (1.0 - 0.622 * LV * CRANKP / (r_d * TG)) * QSS
+           CQ2_G      = 0.622 * LV * QSS * CRANKP / (r_d * TG * TG)
+
+           COEFFNP1_G = 1.0 + DTPBL * CRANKP * (4.0 * RDEMISSIBR * STBOLT * TG**3 * CT                &
+                       - 4.0 * RDEMISSIBR * (1.0 - WLEMISSI) * (1.0 - SKVFRD) * SKVFWL * STBOLT       &
+                       * ((1.0 - SNOW_FRA) * RDEMISSIBR * TG**3 + SNOW_FRA * SNEMISSI * TG**3) * CT   &
+                       + DENS1 * CPAIR / RAH * CPOT * CT + 2.0 * PI                                   &
+                       * TAUINV) + DTPBL * (CT * LV * CQ2_G * CQ4_ST)
+
+           COEFFN_G   = CT * (GSW_URB + RDEMISSIBR * STBOLT * (4.0 * CRANKP - 1.0)            &
+                       * TG*TG*TG*TG + RDEMISSIBR * SKVFRD * LWDN                                            & 
+                       + RDEMISSIBR * WLEMISSI * (1.0 - SKVFRD) * STBOLT * TG_WL**4           & 
+                       + RDEMISSIBR * (1.0 - WLEMISSI) * (1.0 - SKVFRD) * SKVFWL * LWDN                      &
+                       + RDEMISSIBR * WLEMISSI * (1.0 - WLEMISSI) * (1.0 - SKVFRD) * (1.0 - 2.0*SKVFWL)      &      
+                       * STBOLT * TG_WL**4                                                    &
+                       - RDEMISSIBR * (1.0 - WLEMISSI) * (1.0 - SKVFRD) * SKVFWL * STBOLT     &
+                       * ((1.0 - SNOW_FRA) * RDEMISSIBR * (4.0 * CRANKP - 1.0) * TG**4        & 
+                       + SNOW_FRA * SNEMISSI * (4.0 * CRANKP - 1.0) * TG**4)                  & !NET RAD
+                       + DENS1 * CPAIR / RAH * (THETA1 - (1.0 - CRANKP) * THETAG)             &
+                       - LV * (CQ4_ST * (CQ1_G - QV1)))      & !SFC HEAT FLUX
+                       - 2.0 * PI * TAUINV * ((1.0 - CRANKP) * TG - T2)                         !SOIL FLUX
+
+           TSNEW_G    = (TG + DTPBL * COEFFN_G) / COEFFNP1_G
+           !-- FOR SNOW COVERED SURFACE TEMPERATURE IS NOT MORE THAN ZERO
+           IF (XICE1 .GT. 0.5) TSNEW_G = AMIN1(TSNEW_G,273.15)                         ! Re-added Jan 2010 to keep ice surface at or below freezing (J. Pleim)
+           TSHLF_G = 0.5 * (TSNEW_G + TG)
+           T2NEW_G = (T2 + DBLE(DTPBL) * TAUINV * T2TFACU * (TSHLF_G - (1 - CRANKP) * T2)               &
+                    + DTPBL*T2NUD)  &              ! Added deep temperature nudging 
+                    / (1.0 + DBLE(DTPBL) * TAUINV * T2TFACU * CRANKP)
+           !-- REPLACE OLD with NEW Value
+           TGU = TSNEW_G
+           T2U = T2NEW_G
+
+           !-- Diagnostic Outputs
+           LWDN_URB   = RDEMISSIBR * SKVFRD * LWDN + RDEMISSIBR * (1.0 - WLEMISSI) * (1.0 - SKVFRD) * SKVFWL * LWDN
+           LWUP_URB   = RDEMISSIBR * STBOLT *(TGU**4) + RDEMISSIBR * WLEMISSI * (1.0 - SKVFRD) * STBOLT * TG_WL**4                     &
+                        + RDEMISSIBR * WLEMISSI * (1.0 - WLEMISSI) * (1.0 - SKVFRD) * (1.0 - 2.0*SKVFWL) * STBOLT * TG_WL**4          &
+                        + RDEMISSIBR * (1.0 - WLEMISSI) * (1.0 - SKVFRD) * SKVFWL * STBOLT * ((1.0 - SNOW_FRA) * RDEMISSIBR * TGU**4   &
+                         + SNOW_FRA * SNEMISSI * TGU**4)
+           RADNET_URB = GSW_URB + RDEMISSIBR * SKVFRD * LWDN + RDEMISSIBR * (1.0 - WLEMISSI) * (1.0 - SKVFRD)                        &
+                        * SKVFWL * LWDN - RDEMISSIBR * STBOLT * (TGU**4)                                                             &
+                        + RDEMISSIBR * WLEMISSI * (1.0 - SKVFRD) * STBOLT * TG_WL**4 + RDEMISSIBR * WLEMISSI * (1.0 - WLEMISSI)       &
+                         * (1.0 - SKVFRD) * (1.0 - 2.0*SKVFWL) * STBOLT * TG_WL**4    &
+                        + RDEMISSIBR * (1.0 - WLEMISSI) * (1.0 - SKVFRD) * SKVFWL * STBOLT * ((1.0 - SNOW_FRA) * RDEMISSIBR * TGU**4   &
+                         + SNOW_FRA * SNEMISSI * TGU**4) 
+
+
+           !-----------------------------------------------------------------------------------
+           !-- Computation of Urban Walls Temperature, Solving by CRANK-NIC Implicit method:
+           !-- TENDTS=CT*(RADNET-HFX-QFX)
+           !-- Calculate the coefficients for implicit calculation of WALLS TEMP.
+
+           COEFFNP1_WL = 1.0 + DTPBL * CRANKP * (4.0 * WLEMISSI * STBOLT * TG_WL**3 * CT_WL                             &
+                        - 4.0 * WLEMISSI**2 * (1.0 - 2.0*SKVFWL) * STBOLT * TG_WL**3 * CT_WL                            &
+                        - 4.0 * WLEMISSI**2 * (1.0 - WLEMISSI) * (1.0 - 2.0*SKVFWL)**2 * STBOLT * TG_WL**3 * CT_WL      &
+                        - 4.0 * WLEMISSI**2 * (1.0 - RDEMISSIBR) * SKVFWL * (1.0 - SKVFRD) * STBOLT * TG_WL**3 * CT_WL  &
+                        + ETAC * CT_WL + 2.0 * PI * TAUINV)   
+
+           COEFFN_WL   = CT_WL * (GSW_WL + WLEMISSI * STBOLT * (4.0 * CRANKP - 1.0)               &
+                        * TG_WL*TG_WL*TG_WL*TG_WL + WLEMISSI * SKVFWL * LWDN                            &
+                        + WLEMISSI * SKVFWL * STBOLT * ((1.0 - SNOW_FRA) * RDEMISSI               &   
+                        * TGU**4 + SNOW_FRA * SNEMISSI * TGU**4)                                    &
+                        - WLEMISSI**2 * (1.0 - 2.0*SKVFWL) * STBOLT * (4.0 * CRANKP - 1.0) * TG_WL**4   &
+                        + WLEMISSI * (1.0 - RDEMISSIBR) * SKVFWL * SKVFRD * LWDN                        &
+                        + WLEMISSI * (1.0 - WLEMISSI) * SKVFWL * (1.0 - 2.0*SKVFWL) * LWDN              &
+                        - WLEMISSI**2 * (1.0 - WLEMISSI) * (1.0 - 2.0*SKVFWL)**2                  &
+                        * STBOLT * (4.0 * CRANKP - 1.0) * TG_WL**4                                      &  
+                        - WLEMISSI**2 * (1.0 - RDEMISSIBR) * SKVFWL * (1.0 - SKVFRD)              &
+                        * STBOLT * (4.0 * CRANKP - 1.0) * TG_WL**4                                      &
+                        + WLEMISSI * (1.0 - WLEMISSI) * SKVFWL * (1.0 - 2.0*SKVFWL)               &
+                        * STBOLT * ((1.0 - SNOW_FRA) * RDEMISSI * TGU**4 + SNOW_FRA * SNEMISSI * TGU**4)  & !NET RAD    
+                        + ETAC * (TA_CAN - (1.0 - CRANKP) * TG_WL))                               & !SFC HEAT FLUX
+                        - 2.0 * PI * TAUINV * ((1.0 - CRANKP) * TG_WL - T2_WL)
+
+
+           TSNEW_WL    = (TG_WL + DTPBL * COEFFN_WL) / COEFFNP1_WL
+           !-- FOR SNOW COVERED SURFACE TEMPERATURE IS NOT MORE THAN ZERO
+           IF (XICE1 .GT. 0.5) TSNEW_WL = AMIN1(TSNEW_WL,273.15)                         ! Re-added Jan 2010 to keep ice surface at or below freezing (J. Pleim)
+           TSHLF_WL = 0.5 * (TSNEW_WL + TG_WL)
+           T2NEW_WL = (T2_WL + DBLE(DTPBL) * TAUINV * T2TFACU * (TSHLF_WL - (1 - CRANKP) * T2_WL)           &
+                    + DTPBL*T2NUD)  &              ! Added deep temperature nudging
+                    / (1.0 + DBLE(DTPBL) * TAUINV * T2TFACU * CRANKP)
+           !-- REPLACE OLD with NEW Value
+           TG_WL = TSNEW_WL
+           T2_WL = T2NEW_WL 
+
+           !-- Diagnostic Outputs
+           LWDN_WL   = WLEMISSI * SKVFWL * LWDN + WLEMISSI * (1.0 - RDEMISSIBR) * SKVFWL * SKVFRD * LWDN    &
+                       + WLEMISSI * (1.0 - WLEMISSI) * SKVFWL * (1.0 - 2.0*SKVFWL) * LWDN 
+           LWUP_WL   = WLEMISSI * STBOLT * (TG_WL**4) + WLEMISSI * SKVFWL * STBOLT * ((1.0 - SNOW_FRA) * RDEMISSI      &
+                        * TGU**4 + SNOW_FRA * SNEMISSI * TGU**4)   &
+                       + WLEMISSI**2 * (1.0 - 2.0*SKVFWL) * STBOLT * TG_WL**4 + WLEMISSI**2 * (1.0 - WLEMISSI) * (1.0 - 2.0*SKVFWL)**2 * STBOLT * TG_WL**4     &
+                       + WLEMISSI**2 * (1.0 - RDEMISSIBR) * SKVFWL * (1.0 - SKVFRD) * STBOLT * TG_WL**4     &
+                       + WLEMISSI * (1.0 - WLEMISSI) * SKVFWL * (1.0 - 2.0*SKVFWL) * STBOLT * ((1.0 - SNOW_FRA) * RDEMISSI * TGU**4 + SNOW_FRA * SNEMISSI * TGU**4)   
+           RADNET_WL = GSW + WLEMISSI * SKVFWL * LWDN + WLEMISSI * (1.0 - RDEMISSIBR) * SKVFWL * SKVFRD * LWDN         &
+                       + WLEMISSI * (1.0 - WLEMISSI) * SKVFWL * (1.0 - 2.0*SKVFWL) * LWDN    &
+                       - WLEMISSI * STBOLT * (TG_WL**4) + WLEMISSI * STBOLT * (TG_WL**4) + WLEMISSI * SKVFWL * STBOLT * ((1.0 - SNOW_FRA) * RDEMISSI           &
+                        * TGU**4 + SNOW_FRA * SNEMISSI * TGU**4)   &
+                       + WLEMISSI**2 * (1.0 - 2.0*SKVFWL) * STBOLT * TG_WL**4 + WLEMISSI**2 * (1.0 - WLEMISSI) * (1.0 - 2.0*SKVFWL)**2 * STBOLT * TG_WL**4     &
+                       + WLEMISSI**2 * (1.0 - RDEMISSIBR) * SKVFWL * (1.0 - SKVFRD) * STBOLT * TG_WL**4     &
+                       + WLEMISSI * (1.0 - WLEMISSI) * SKVFWL * (1.0 - 2.0*SKVFWL) * STBOLT * ((1.0 - SNOW_FRA) * RDEMISSI * TGU**4 + SNOW_FRA * SNEMISSI * TGU**4)  
+
+
+        ENDIF   ! Urban
+
+        IF (IFLAND .LT. 1.5) THEN         ! For Non-urban ground surface
           !-- SOLVE BY CRANK-NIC --   TENDTS=CT*(RADNET-HFX-QFX)-SOILFLX 
           !-- Calculate the coefficients for implicit calculation of TG
           CQ1      = (1.0 - 0.622 * LV * CRANKP / (r_d * TG)) * QSS
@@ -1387,9 +2364,10 @@ CONTAINS
           CQ3VW    = DENS1 * VEGFRC*SIGG / RAW
           CQ3VG    = DENS1 * VEGFRC / (RAW + RSOIL + RINC)
           CQ3      = CQ3BG + CQ3VW + CQ3VG
+
           COEFFNP1 = 1.0 + DTPBL * CRANKP * (4.0 * EMISSI *  STBOLT * TG ** 3    &
                      * CT + DENS1 * CPAIR / RAH * CPOT * CT + 2.0 * PI           &
-                     * TAUINV ) + DTPBL * (CT * LV * CQ2 * (CQ3 + CQ4))
+                     * TAUINV) + DTPBL * (CT * LV * CQ2 * (CQ3 + CQ4))
           COEFFN   = CT * (GSW + EMISSI * (STBOLT * (4.0 * CRANKP - 1.0)         &
                      * TG*TG*TG*TG + LWDN)                                       & !NET RAD
                      + DENS1 * CPAIR / RAH * (THETA1 - (1.0 - CRANKP) * THETAG)  &
@@ -1398,27 +2376,104 @@ CONTAINS
           TSNEW    = (TG + DTPBL * COEFFN) / COEFFNP1
           !-- FOR SNOW COVERED SURFACE TEMPERATURE IS NOT MORE THAN ZERO
           IF (XICE1 .GT. 0.5) TSNEW = AMIN1(TSNEW,273.15)                         ! Re-added Jan 2010 to keep ice surface at or below freezing (J. Pleim)
-          TSHLF = 0.5 * ( TSNEW + TG)
-          T2NEW = (T2 + DTPBL * TAUINV * T2TFAC * (TSHLF - (1 - CRANKP) * T2)     &
-                + DTPBL*T2NUD)  &              ! Added deep temperature nudging 
-                  / (1.0 + DTPBL * TAUINV * T2TFAC * CRANKP)
+          TSHLF = 0.5 * (TSNEW + TG)
+          T2NEW = (T2 + DBLE(DTPBL) * TAUINV * T2TFAC * (TSHLF - (1 - CRANKP) * T2)     &
+                   + DTPBL*T2NUD)  &              ! Added deep temperature nudging 
+                   / (1.0 + DBLE(DTPBL) * TAUINV * T2TFAC * CRANKP)
           !-- REPLACE OLD with NEW Value
-          TG = TSNEW
-          T2 = T2NEW             
+          IF (ISPXURB .AND. (URBF .GT. 0.0)) THEN  
+            TG = (1.-MAX(URBF,0.0))*TSNEW + URBF*TGU
+            T2 = (1.d0-MAX(DBLE(URBF),0.0d0))*T2NEW + DBLE(URBF)*T2U 
+          ELSE
+            TG = TSNEW
+            T2 = T2NEW
+!          if(I.eq.18.and.j.eq.131)  PRINT *, 'T2,URBF,T2NEW,TSHLF,I,J,ISPXURB,ITIMESTEP',      &
+!                               T2,URBF,T2NEW,TSHLF,I,J,ISPXURB,ITIMESTEP
+          ENDIF
         ENDIF
         !-----------------------------------------------------------------------------------------
 
         !-----------------------------------------------------------------------------------------
-      ! Compute new subsurface soil and canopy moisture values DENS1. No change required over ocean.
-        IF (IFLAND .LT. 1.5.AND. XICE1.LT.0.5) THEN  
-          !-- Compute WR
+        ! Compute new subsurface soil and canopy moisture values DENS1. No change required over ocean.
+        !--For Urban-vegetation grid -----------------------   !---UTK-Urban
+        IF (IFLAND .LT. 1.5.AND. XICE1.LT.0.5) THEN     !------------(1) 
+          IF (ISPXURB .AND. (URBF .GT. 0.0)) THEN    ! For Urban Land 
+             !-- Compute WR_ST
+             ROFF = 0.0    
+             WRMAX_ST = 0.247E-3     ! (meter) From Nakayoshi et al., 2009
+
+             IF (WRMAX_ST .GT. 0.0) THEN
+               !--  PC is precip. intercepted by street.(M/S)
+               PC    = STFA * SIGFF * PRECIP
+               DWR   = (WRMAX_ST - WR_ST) / DTPBL                       ! the tendency to reach max.
+               PNET  = PC - ER_ST/ DENW                                 ! residual of precip. and evap.
+               IF (PNET .GT. DWR) THEN
+                 ROFF = PNET - DWR
+                 PC   = PC - ROFF
+               ENDIF
+               IF (QSS .LT. QV1) THEN
+                 TENDWR   = PC - ER_ST / DENW
+                 WRNEW_ST = WR_ST + DTPBL * TENDWR
+               ELSE
+                 COF1     = DENS1 / DENW * STFA * (QSS - QV1) / RAW
+                 !-- using delta=wr/wrmax
+                 CFNP1WR  = 1.0 + DTPBL * COF1 * CRANKP / WRMAX_ST  
+                 CFNWR    = PC - COF1 * (1.0 - CRANKP) * WR_ST / WRMAX_ST
+                 WRNEW_ST = (WR_ST + DTPBL * CFNWR) / CFNP1WR
+               ENDIF
+             ELSE
+               PC = 0.0
+               WRNEW_ST = 0.0  
+             ENDIF 
+             !------------------------------
+             !.. new value             
+             WR_ST = AMIN1(WRMAX_ST,WRNEW_ST)
+     
+             !----------------------------------------------  
+
+             !-- Compute WR_RF
+             ROFF = 0.0    
+             WRMAX_RF = 0.239E-3     ! (meter) From Nakayoshi et al., 2009
+ 
+             IF (WRMAX_RF .GT. 0.0) THEN
+               !--  PC is precip. intercepted by roof.(M/S)
+               PC    = RFFA * SIGFF * PRECIP
+               DWR   = (WRMAX_RF - WR_RF) / DTPBL                    ! the tendency to reach max.
+               PNET  = PC - ER_RF/ DENW                              ! residual of precip. and evap.
+               IF (PNET .GT. DWR) THEN
+                 ROFF = PNET - DWR
+                 PC   = PC - ROFF
+               ENDIF
+               IF (QSS_RF .LT. QV_RF) THEN      
+                 TENDWR   = PC - ER_RF / DENW
+                 WRNEW_RF = WR_RF + DTPBL * TENDWR
+               ELSE
+                 COF1      = DENS1 / DENW * RFFA * (QSS_RF - QV_RF) / RAW
+                 !-- using delta=wr/wrmax
+                 CFNP1WR   = 1.0 + DTPBL * COF1 * CRANKP / WRMAX_RF  
+                 CFNWR     = PC - COF1 * (1.0 - CRANKP) * WR_RF / WRMAX_RF
+                 WRNEW_RF  = (WR_RF + DTPBL * CFNWR) / CFNP1WR
+               ENDIF
+             ELSE
+               PC = 0.0
+               WRNEW_RF = 0.0  
+             ENDIF 
+             !------------------------------
+             !.. new value             
+             WR_RF = AMIN1(WRMAX_RF,WRNEW_RF)
+
+             !----------------------------------------------
+    
+          ENDIF   ! Urban Part
+ 
+          !-- Compute WR (Default PX)
           ROFF  = 0.0
           WRMAX = 0.2E-3 * VEGFRC * LAI                     ! max. WRMAX IN m
           
-          IF(WRMAX.GT.0.0) THEN
+          IF (WRMAX.GT.0.0) THEN
             !--  PC is precip. intercepted by veg.(M/S)
             PC    = VEGFRC * SIGF * PRECIP
-            DWR   = (WRMAX - WR) / DTPBL                       !the tendency to reach max.
+            DWR   = (WRMAX - WR) / DTPBL                       ! the tendency to reach max.
             PNET  = PC - ER/ DENW                              ! residual of precip. and evap.
             IF (PNET .GT. DWR) THEN
               ROFF = PNET - DWR
@@ -1435,8 +2490,8 @@ CONTAINS
               WRNEW   = (WR + DTPBL * CFNWR) / CFNP1WR
             ENDIF
           ELSE
-            PC=0.0
-            WRNEW=0.0  
+            PC    = 0.0
+            WRNEW = 0.0  
           ENDIF
           !---------------------------------------------
           !-- Compute W2
@@ -1451,14 +2506,15 @@ CONTAINS
           !.. new values
           W2     = W2NEW
           WR     = AMIN1(WRMAX,WRNEW)
-        ENDIF
+        ENDIF       !------------------(1)
+
         !-----------------------------------------------------------------------------------------
 
         !-----------------------------------------------------------------------------------------
-      ! Compute new surface soil moisture values (WR).
-        IF (IFLAND .LT. 1.5.AND. XICE1.LT.0.5) THEN  ! over ocean no change to wg w2,wr
-        !--    FOR SNOW COVERED SURFACE, ASSUME SURFACE IS SATURATED AND
-        !      WG AND W2 ARE NOT CHANGED
+        ! Compute new surface soil moisture values (WG).
+        IF (IFLAND .LT. 1.5 .AND. XICE1 .LT. 0.5) THEN  ! over ocean no change to wg w2,wr
+          !--    FOR SNOW COVERED SURFACE, ASSUME SURFACE IS SATURATED AND
+          !      WG AND W2 ARE NOT CHANGED
           IF (ISNOW .GT.0.5) THEN
             WG = WSAT
           ELSE
@@ -1479,7 +2535,6 @@ CONTAINS
               ZB  = ZA**2 / ZLY
               C1 = DS1*C1MAX * EXP(-(WG-ZA)**2/ZB)
             ENDIF
-
             C2 = C2R * W2HLF / (WSAT - W2HLF + 1.E-11) 
             IF (W2HLF .GE. WSAT) THEN
               WEQ = WSAT
@@ -1493,12 +2548,11 @@ CONTAINS
             CFN   = C1 / (DENW * DS1) * (PG - EG) - C2 * TAUINV *               &
                     ((1.0 - CRANKP) * WG - WEQ) + WGNUDG/ DS1
 
-            WGNEW = AMAX1((WG + DTPBL * CFN) / CFNP1, WRES ) !0.001)  ! Limei 08/02/2017
+            WGNEW = AMAX1((WG + DTPBL * CFN) / CFNP1, WRES)
             !-- NEW VALUES
-            WG    = AMIN1(WGNEW,WSAT)
-            
+            WG    = AMIN1(WGNEW, WSAT)
           ENDIF                  !endif for ISNOW
-        ENDIF                    !endif for XLAND
+        ENDIF           !----------------(2)
             
       END SUBROUTINE surfpx
 !-------------------------------------------------------------------------
@@ -1506,11 +2560,13 @@ CONTAINS
 
 !-------------------------------------------------------------------------
 !-------------------------------------------------------------------------
-      SUBROUTINE QFLUX (DENS1,  QV1,   TA1,  RG,     RAW, QSS,           & ! in
-                        VEGFRC, ISNOW, ISTI, IFLAND, LAI, BETAP,         & ! in
-                        WG,     W2,    WR,                               & ! in
-                        RSTMIN, WWLT,  WFC,  RSOIL, RINC,                & ! in
-                        EG,     ER,    ETR,  CQ4,    RS,  FASS, SIGG )     ! out        
+      SUBROUTINE QFLUX(URBF, DTPBL, ISPXURB, DENS1, DENSRF,                  & !in
+                       QV1, QV_RF, TA1, RG, RAW, QSS, QSS_RF,                & !in
+                       VEGFRC, ISNOW, ISTI, IFLAND, LAI, BETAP,              & !in
+                       WG, W2, WR, WR_ST, WR_VEG, WR_RF, STFA, VEGFA, RFFA,  & !in and UTK-in
+                       RSTMIN, WWLT, WFC, RSOIL, RINC, SIGG,                 & !in
+                       EG, ER, ETR, ER_ST, ER_RF,                            & !out and UTK-out
+                       CQ4, CQ4_RF, CQ4_ST, RS, FASS                         ) !out
 
 !-------------------------------------------------------------------------
 !                                                              
@@ -1557,44 +2613,98 @@ CONTAINS
       IMPLICIT NONE
 
 ! DECLARATIONS - INTEGER
-      INTEGER , INTENT(IN)  :: ISTI
+      INTEGER, INTENT(IN) :: ISTI
 
 ! DECLARATIONS - REAL
-      REAL ,    INTENT(IN)  :: ISNOW, IFLAND
-      REAL ,    INTENT(IN)  :: DENS1, QV1, TA1, RG, RAW, QSS,            &
-                               VEGFRC, LAI,                              &
-                               WG, W2, WR, RSTMIN   
-      REAL ,    INTENT(INOUT)  :: BETAP, RSOIL
-      REAL,     INTENT(IN)   :: WWLT, WFC, RINC
-
-      REAL ,    INTENT(OUT) :: EG, ER, ETR, CQ4, RS, FASS, SIGG
+      REAL, INTENT(IN)    :: ISNOW, IFLAND
+      REAL, INTENT(IN)    :: DENS1, QV1, TA1, RG, RAW, QSS,            &
+                             VEGFRC, LAI,                              &
+                             WG, W2, WR, RSTMIN, QV_RF, QSS_RF, DENSRF
+      REAL, INTENT(IN)    :: WR_ST, WR_VEG, WR_RF                  ! UTK Urban in
+      REAL, INTENT(INOUT) :: BETAP, RSOIL
+      REAL, INTENT(IN)    :: WWLT, WFC, RINC
+      REAL, INTENT(IN)    :: URBF, DTPBL, STFA, VEGFA, RFFA        ! UTK Urban in
+      REAL, INTENT(OUT)   :: EG, ER, ETR, CQ4, RS, FASS, SIGG
+      REAL, INTENT(OUT)   :: ER_ST,  ER_RF, CQ4_RF, CQ4_ST   ! UTK out
+      LOGICAL, INTENT(IN) :: ISPXURB
 
 !... Local Variables
 
 !... Real
-      REAL    :: WRMAX, DELTA, RADL, RADF, W2AVAIL, W2MXAV
-      REAL    :: FTOT, F1, F2, F3,  F4
-      REAL    :: FSHELT, GS, GA, FX
-      REAL    :: PAR, F1MAX
-
+      REAL :: WRMAX, DELTA, RADL, RADF, W2AVAIL, W2MXAV
+      REAL :: FTOT, F1, F2, F3,  F4
+      REAL :: FSHELT, GS, GA, FX
+      REAL :: PAR, F1MAX
+      REAL :: WRMAX_ST, WRMAX_VEG, WRMAX_RF
+      REAL :: SIGG1, SIGG2, SIGG3
 
 !... Parameters
       REAL, PARAMETER :: RSMAX = 5000.0                ! s/m
       REAL, PARAMETER :: FTMIN = 0.0000001             ! m/s
       REAL, PARAMETER :: F3MIN = 0.25
 
-!
 !... for water surface, no canopy evaporation and transpiration
+
+      !-- Initialize
       ER  = 0.0
       ETR = 0.0
       CQ4 = 0.0
-      
-!... GROUND EVAPORATION (DEPOSITION)
-      IF (QSS .LT. QV1) RSOIL = 0.0
-      EG = DENS1 * (QSS - QV1) * ((1.0 - VEGFRC) / (RAW + RSOIL) + VEGFRC/(RAW + RINC +RSOIL))
 
-!... CANOPY
-      IF (IFLAND .LT. 1.5 .AND. VEGFRC .GT. 0.0)  THEN
+      ER_ST  = 0.0
+      ER_RF  = 0.0
+      CQ4_RF = 0.0           ! Coeff. for urban roof water in Crank-Nicolson
+      CQ4_ST = 0.0           ! Coeff. for urban street water in Crank-Nicolson
+
+!... GROUND EVAPORATION (DEPOSITION)        [From soil]
+
+      IF (QSS .LT. QV1) RSOIL = 0.0
+
+      EG = DENS1 * (QSS - QV1) * ((1.0 - VEGFRC) / (RAW + RSOIL) + VEGFRC / (RAW + RINC + RSOIL))
+
+
+!!----------------------------------------------------------------------------
+!... Evaporation from Urban Street , Veg., Roof Canopy    !-----UTK Urban    
+      IF (IFLAND .LT. 1.5 .AND. VEGFRC .GT. 0.0) THEN     !----------------(3) 
+        IF (ISPXURB .AND. (URBF .GT. 0.0)) THEN      ! For Urban Land 
+          WRMAX_ST = 0.247E-3      ! in (m) unit from Nakayoshi et al., 2009
+          IF (WR_ST .LE. 0.0) THEN
+             DELTA = 0.0  
+          ELSE
+             DELTA = WR_ST / WRMAX_ST
+          ENDIF
+
+          IF (QSS .GE. QV1) THEN
+            SIGG1 = DELTA 
+          ELSE
+            SIGG1 = 1.0
+          END IF
+     
+          ER_ST  = DENS1 * STFA * SIGG1 * (QSS - QV1) / RAW
+          CQ4_ST = DENS1 * SIGG1 / RAW     
+
+
+          ! From Roof Surface
+          WRMAX_RF = 0.239E-3      ! in (m) unit from Nakayoshi et al., 2009
+          IF (WR_RF .LE. 0.0) THEN
+            DELTA = 0.0  
+          ELSE
+            DELTA = WR_RF / WRMAX_RF
+          ENDIF
+
+          IF (QSS_RF .GE. QV_RF) THEN
+            SIGG3 = DELTA 
+          ELSE
+            SIGG3 = 1.0
+          END IF
+     
+          ER_RF  = DENSRF * RFFA * SIGG3 * (QSS_RF - QV_RF) / RAW
+          CQ4_RF = DENSRF * SIGG3 / RAW
+
+
+!... VEG CANOPY only  
+     
+        ENDIF   ! FUrban Part
+
         WRMAX = 0.2E-3 * VEGFRC * LAI   ! in unit m
         IF (WR .LE. 0.0) THEN
           DELTA = 0.0
@@ -1609,22 +2719,24 @@ CONTAINS
         ENDIF
 
         ER = DENS1 * VEGFRC * SIGG * (QSS - QV1) / RAW  
-      ENDIF
+
+      ENDIF        !---------------(3)
       !!---------------------------------------------------------------------
 
-      !-- TRANSPIRATION
       !!---------------------------------------------------------------------
-      IF (IFLAND .LT. 1.5 .AND. VEGFRC .GT. 0.0)  THEN
+      !-- TRANSPIRATION from Vegetation
+      !!---------------------------------------------------------------------
+      IF (IFLAND .LT. 1.5 .AND. VEGFRC .GT. 0.0)  THEN      !--------------(4)
         
         !!!-RADIATION
         IF (RSTMIN .GT. 130.0) THEN
-          F1MAX = 1.-0.02*LAI    !Echer2015  Trees
+          F1MAX = 1. - 0.02 * LAI    !Echer2015  Trees
         ELSE
-          F1MAX = 1.-0.07*LAI    !Echer2015 crops/grass
+          F1MAX = 1. - 0.07 * LAI    !Echer2015 crops/grass
         ENDIF
         PAR = 0.45 * RG * 4.566  ! converted from W/m2 to umoles/m2/s  (1/.219)  Echer2015
-        F1 = F1MAX*(1.0-exp(-0.0017*PAR))   !Echer2015
-        F1 = AMAX1(F1,RSTMIN / RSMAX)
+        F1 = F1MAX * (1.0 - exp(-0.0017 * PAR))   !Echer2015
+        F1 = AMAX1(F1, RSTMIN / RSMAX)
 
         !!!-SOIL MOISTURE
         W2AVAIL = W2 - WWLT
@@ -1641,10 +2753,10 @@ CONTAINS
         ENDIF
 
         FTOT = LAI * F1 * F2 * F4
-      ENDIF
+      ENDIF       !---------------(4)
 
-      !!---------------------------------------------------------------------
-      IF (IFLAND .LT. 1.5 .AND. VEGFRC .GT. 0.0)  THEN
+
+      IF (IFLAND .LT. 1.5 .AND. VEGFRC .GT. 0.0)  THEN      !---------------(5)
         FSHELT = 1.0   ! go back to NP89
         GS     = FTOT / (RSTMIN * FSHELT)
         GA     = 1.0 / RAW
@@ -1663,10 +2775,11 @@ CONTAINS
         ENDIF
 
         FASS = FX
+
         ETR = DENS1 * VEGFRC * (1.0 - SIGG) * (QSS - QV1) / (RAW + RS)
         !..... CQ4 is used for the implicit calculation of TG in SURFACE
         CQ4 = DENS1 * VEGFRC * ((1.0 - SIGG) / (RAW + RS) + SIGG / RAW)
-      ENDIF         
+      ENDIF      !---------------(5)
 
     END SUBROUTINE qflux
 !------------------------------------------------------------------------------------------

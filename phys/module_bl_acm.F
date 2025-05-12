@@ -25,6 +25,12 @@ CONTAINS
                      GZ1OZ0,   WSPD,     PSIM, MUT, RMOL,             &
                      RUBLTEN,  RVBLTEN,  RTHBLTEN,                    &
                      RQVBLTEN, RQCBLTEN, RQIBLTEN,                    &
+                     NLCAT,    LANDUSEF,                              &  ! DDY urban
+                     COSZ,     SWDOWN, IFUACM,                        &  ! DDY urban
+                     HFX_RF,   HFX_WL,   QFX_RF,                      &  ! UTK urban
+                     LAMP, BUILD_HEIGHT, LAMF,                        &
+                     STDIR1, STDIR2, BLKW1, BLKW2,                    &
+                     UST_WL,UST_RF,UST_ST,                            &      
                      ids,ide, jds,jde, kds,kde,                       &
                      ims,ime, jms,jme, kms,kme,                       &
                      its,ite, jts,jte, kts,kte)
@@ -48,8 +54,16 @@ CONTAINS
 !     RG and JP 7/2006   - Finished WRF adaptation
 !     JP 12/2011 12/2011 - ACM2 modified so it's not dependent on first layer thickness. 
 !     JP        3/2013   - WRFChem version. Mixing of chemical species are added
+!     JP 12/2014         - Km and Kh updated. New Richardson number stability function.
+!                          Reduces day and night 2-m temperature bias.
+!     JP 12/2014         - Minimum PBL height bug caused PBLH lower than first level thickness in very stable 
+!                          conditions. Fixed so PBLH minimum is layer 1 thickness.
+!     JP 12/2015         - RMOL updated after initial calculation in the PX-SFCLAY.
+!     DDY 1/2016         - Inclusion of the urban momentum drag
 !     HF        5/2016   - MPAS version  
 !     JP        8/2017   - Z-coord version from MPAS version for hybrid coords  
+!     UTK 5/2018         - Inclusion of the urban ground and rooftop heat fluxes
+!                        - Inclusion of the urban moisture flux
 !     JP        10/2020  - Fixed a bug where KSRC is now an array dimensioned ( its:ite )
 !                        - Modified the PBL height algorithm for stable conditions so
 !                          that the Richardson number is computed using windspeed in layer
@@ -123,43 +137,54 @@ CONTAINS
 
 !.......Arguments
 ! DECLARATIONS - INTEGER
-    INTEGER,  INTENT(IN   )   ::      ids,ide, jds,jde, kds,kde, &
-                                      ims,ime, jms,jme, kms,kme, &
-                                      its,ite, jts,jte, kts,kte, XTIME
+    INTEGER, INTENT(IN) :: ids,ide, jds,jde, kds,kde,       &
+                           ims,ime, jms,jme, kms,kme,       &
+                           its,ite, jts,jte, kts,kte, XTIME
 
 ! DECLARATIONS - REAL
-    REAL,                                INTENT(IN)  ::  DTPBL, EP1,   &
-                                                        G, ROVCP, RD, CPD
+    REAL, INTENT(IN)    :: DTPBL, EP1, G, ROVCP, RD, CPD
 
-    REAL,    DIMENSION( ims:ime, kms:kme, jms:jme ),                         &
-             INTENT(IN) ::                              U3D, V3D,            &
-                                                        PP3D, DZ8W, T3D,     &
-                                                        QV3D, QC3D, QI3D,    &
-                                                        RR3D, TH3D
+    REAL, DIMENSION( ims:ime, kms:kme, jms:jme ),                              &
+             INTENT(IN)                                :: U3D, V3D,            &
+                                                          PP3D, DZ8W, T3D,     &
+                                                          QV3D, QC3D, QI3D,    &
+                                                          RR3D, TH3D
 
-    REAL,    DIMENSION( ims:ime, jms:jme ), INTENT(IN) :: PSIM, GZ1OZ0,     &
-                                                          HFX, QFX, TSK,    &
+    REAL, DIMENSION( ims:ime, jms:jme ), INTENT(IN)    :: PSIM, GZ1OZ0,        &
+                                                          HFX, QFX, TSK,       &
                                                           PSFC, WSPD, MUT
 
-    REAL,    DIMENSION( ims:ime, jms:jme ), INTENT(INOUT) ::  PBLH, REGIME, & 
-                                                              UST, RMOL
+    REAL, DIMENSION( ims:ime, jms:jme ), INTENT(INOUT) :: PBLH, REGIME,        & 
+                                                          UST, RMOL
 
-    REAL,    DIMENSION( ims:ime, kms:kme, jms:jme ),                         &
-             INTENT(INOUT)   ::                         RUBLTEN, RVBLTEN,    &
-                                                        RTHBLTEN, RQVBLTEN,  &
-                                                        RQCBLTEN, RQIBLTEN
+    REAL, DIMENSION( ims:ime, kms:kme, jms:jme ),                              &
+             INTENT(INOUT)                             :: RUBLTEN, RVBLTEN,    &
+                                                          RTHBLTEN, RQVBLTEN,  &
+                                                          RQCBLTEN, RQIBLTEN
 
-   real,     dimension( ims:ime, kms:kme, jms:jme ),                         &
-             intent(inout)   ::                         exch_h,exch_m
+    real, dimension( ims:ime, kms:kme, jms:jme ),                              &
+             intent(inout)                             :: exch_h, exch_m
 
-    INTEGER, DIMENSION( ims:ime, jms:jme ), INTENT(OUT  ) ::  KPBL2D
- 
+    INTEGER, DIMENSION( ims:ime, jms:jme ), INTENT(OUT) :: KPBL2D
+    real, dimension( ims:ime, kms:kme, jms:jme ), INTENT(OUT) :: UST_WL
+    real, DIMENSION( ims:ime, jms:jme ), INTENT(OUT) :: UST_RF, UST_ST
+
 #if (WRF_CHEM == 1)
 !... Chem
-    INTEGER, INTENT(IN   )   ::   nchem, kdvel, ndvel, num_vert_mix
-    REAL,    DIMENSION( ims:ime, kms:kme, jms:jme, nchem ), INTENT(INOUT) :: CHEM3D
-    REAL,    DIMENSION( ims:ime, kdvel, jms:jme, ndvel ), INTENT(IN) :: VD3D
+    INTEGER, INTENT(IN) :: nchem, kdvel, ndvel, num_vert_mix
+    REAL, DIMENSION( ims:ime, kms:kme, jms:jme, nchem ), INTENT(INOUT) :: CHEM3D
+    REAL, DIMENSION( ims:ime, kdvel, jms:jme, ndvel ), INTENT(IN)      :: VD3D
 #endif
+
+!-- DDY-UTK urban
+    INTEGER, INTENT(IN) :: NLCAT      
+    REAL, DIMENSION( ims:ime , 1:NLCAT, jms:jme ), INTENT(IN) :: LANDUSEF
+    REAL, DIMENSION(ims:ime,jms:jme),INTENT(IN)               :: COSZ,SWDOWN
+    REAL, DIMENSION(ims:ime,jms:jme),INTENT(IN)               :: HFX_RF, HFX_WL, QFX_RF
+    REAL, DIMENSION(ims:ime,jms:jme),INTENT(IN)               :: LAMP, BUILD_HEIGHT, LAMF
+    INTEGER, DIMENSION(ims:ime,jms:jme),INTENT(IN)            :: STDIR1, STDIR2
+    REAL, DIMENSION(ims:ime,jms:jme),INTENT(IN)               :: BLKW1, BLKW2
+    INTEGER, INTENT(IN   )                                    :: IFUACM
 !... Local Variables
 
 !... Integer
@@ -173,6 +198,11 @@ CONTAINS
     REAL,    DIMENSION( ims:ime, kms:kme, nchem ) :: CHEM2D
     REAL,    DIMENSION( ims:ime, kdvel, ndvel ) :: VD2D
 #endif
+
+
+!--------------------Executables start here--------------------------
+!--------------------------------------------------------------------
+
    
    RDT = 1.0 / DTPBL
 
@@ -208,7 +238,7 @@ CONTAINS
               ,num_vert_mix=num_vert_mix                           &
 #endif
               ,dzf=DZ8W(ims,kms,j)                                 &
-              ,densx=RR3D(ims,kms,j)                              &
+              ,densx=RR3D(ims,kms,j)                               &
               ,utnp=rublten(ims,kms,j),vtnp=rvblten(ims,kms,j)     &
               ,ttnp=rthblten(ims,kms,j),qvtnp=rqvblten(ims,kms,j)  &
               ,qctnp=rqcblten(ims,kms,j),qitnp=rqiblten(ims,kms,j) &
@@ -218,11 +248,20 @@ CONTAINS
               ,exch_hx=exch_h(ims,kms,j)                           &
               ,exch_mx=exch_m(ims,kms,j)                           &
               ,regime=regime(ims,j),psim=psim(ims,j)               &
-              ,hfx=hfx(ims,j),qfx=qfx(ims,j)                       &
+              ,hfx=hfx(ims,j),hfx_rf=hfx_rf(ims,j)                 & ! UTK urban
+              ,hfx_wl=hfx_wl(ims,j),qfx_rf=qfx_rf(ims,j)           & ! UTK urban
+              ,qfx=qfx(ims,j)                                      & ! UTK urban
               ,tg=tsk(ims,j),gz1oz0=gz1oz0(ims,j)                  &
               ,wspd=wspd(ims,j) ,klpbl=kpbl2d(ims,j)               &
               ,mut=mut(ims,j), rmol=rmol(ims,j)                    &
               ,ep1=ep1,karman=karman                               &
+              ,nlcat=nlcat,landusef=landusef(ims,1,j)              & ! DDY urban
+              ,cosz=cosz(ims,j),swdown=swdown(ims,j)               & ! DDY urban
+              ,lamp=lamp(ims,j), HGTBDG=BUILD_HEIGHT(ims,j), lamf=lamf(ims,j) &
+              ,stdir1=stdir1(ims,j), stdir2=stdir2(ims,j)          &
+              ,blkw1=blkw1(ims,j), blkw2=blkw2(ims,j)              &
+              ,UST_WL=UST_WL(ims,kms,j),UST_RF=UST_RF(ims,j)       &
+              ,UST_ST=UST_ST(ims,j),IFUACM=ifuacm                  &
               ,ids=ids,ide=ide, jds=jds,jde=jde, kds=kds,kde=kde   &
               ,ims=ims,ime=ime, jms=jms,jme=jme, kms=kms,kme=kme   &
               ,its=its,ite=ite, jts=jts,jte=jte, kts=kts,kte=kte   )
@@ -242,21 +281,27 @@ CONTAINS
 
 !-----------------------------------------------------------------------
 !-----------------------------------------------------------------------
-   SUBROUTINE ACM2D(j,xtime,dtpbl                           &
-              ,us,vs,theta,tt,qvs,qcs,qis                   &
+   SUBROUTINE ACM2D(j, xtime, dtpbl                                &
+              ,us, vs, theta, tt, qvs, qcs, qis                    &
 #if (WRF_CHEM == 1)
-              ,chem,  vd, nchem, kdvel, ndvel               &
-              ,num_vert_mix                                 &
+              ,chem, vd, nchem, kdvel, ndvel                       &
+              ,num_vert_mix                                        &
 #endif
-              ,dzf,densx,utnp,vtnp,ttnp,qvtnp,qctnp,qitnp   &
-              ,cpd,g,rovcp,rd,rdt,psfcpa,ust                &
-              ,pbl,exch_hx,exch_mx,regime,psim                      &
-              ,hfx,qfx,tg,gz1oz0,wspd ,klpbl                &
-              ,mut, rmol                                    &
-              ,ep1,karman                                   &
-              ,ids,ide, jds,jde, kds,kde   &
-              ,ims,ime, jms,jme, kms,kme   &
-              ,its,ite, jts,jte, kts,kte   )
+              ,dzf, densx, utnp, vtnp, ttnp, qvtnp, qctnp, qitnp   &
+              ,cpd, g, rovcp, rd, rdt, psfcpa, ust                 &
+              ,pbl, exch_hx, exch_mx, regime, psim                 &
+              ,hfx, hfx_rf, hfx_wl, qfx_rf, qfx, tg, gz1oz0        &
+              ,wspd, klpbl                                         &
+              ,mut, rmol                                           &
+              ,ep1, karman                                         &
+              ,nlcat, landusef                                     & ! DDY urban 
+              ,cosz, swdown                                        & ! DDY urban
+              ,lamp, HGTBDG, lamf                                  &
+              ,stdir1, stdir2, blkw1, blkw2                        &
+              ,UST_WL,UST_RF,UST_ST,IFUACM                         &
+              ,ids,ide, jds,jde, kds,kde                           &
+              ,ims,ime, jms,jme, kms,kme                           &
+              ,its,ite, jts,jte, kts,kte                           )
 
 !-----------------------------------------------------------------------
 !-----------------------------------------------------------------------
@@ -265,62 +310,110 @@ CONTAINS
 !.......Arguments
 
 !... Real
-      REAL ,                                INTENT(IN)  :: DTPBL, G, RD,ep1,karman,CPD,ROVCP,RDT
-      REAL , DIMENSION( ims:ime ),          INTENT(INOUT)  :: PBL, UST
+      REAL,                                INTENT(IN)    :: DTPBL, G, RD, ep1, karman, CPD, ROVCP, RDT
+      REAL, DIMENSION( ims:ime ),          INTENT(INOUT) :: PBL, UST
       
-      REAL , DIMENSION( ims:ime, kms:kme ), INTENT(IN)  :: US,VS, THETA, TT,   &
-                                                           QVS, QCS, QIS, DENSX
-      REAL,  DIMENSION( ims:ime, kms:kme ), intent(in)  :: DZF
-      REAL,  DIMENSION( ims:ime, kms:kme ), intent(inout)   ::  utnp,  &
-                                                                vtnp,  &
-                                                                ttnp,  &
-                                                                qvtnp, &
-                                                                qctnp, &
-                                                                qitnp
-      real,     dimension( ims:ime ), intent(in   )   ::   psfcpa
-      real,     dimension( ims:ime ), intent(in   )   ::   tg
-      real,     dimension( ims:ime ), intent(inout)   ::   regime, rmol
-      real,     dimension( ims:ime ), intent(in)      ::   wspd, psim, gz1oz0
-      real,     dimension( ims:ime ), intent(in)      ::   hfx, qfx
-      real,     dimension( ims:ime ), intent(in)      ::   mut
-      real,     dimension( ims:ime, kms:kme ),                    &
-                intent(inout)                         ::   exch_hx,exch_mx
+      REAL, DIMENSION( ims:ime, kms:kme ), INTENT(IN)    :: US, VS, THETA, TT,   &
+                                                            QVS, QCS, QIS, DENSX
+      REAL, DIMENSION( ims:ime, kms:kme ), intent(in)    :: DZF
+      REAL, DIMENSION( ims:ime, kms:kme ), intent(inout) :: utnp,  &
+                                                            vtnp,  &
+                                                            ttnp,  &
+                                                            qvtnp, &
+                                                            qctnp, &
+                                                            qitnp
+      real, dimension( ims:ime ), intent(in)     :: psfcpa
+      real, dimension( ims:ime ), intent(in)     :: tg
+      real, dimension( ims:ime ), intent(inout)  :: regime, rmol
+      real, dimension( ims:ime ), intent(in)     :: wspd, psim, gz1oz0
+      real, dimension( ims:ime ), intent(in)     :: hfx, qfx, hfx_rf, hfx_wl, qfx_rf
+      real, dimension( ims:ime ), intent(in)     :: mut
+      real, dimension( ims:ime, kms:kme ),                         &
+               intent(inout)                     :: exch_hx, exch_mx
+      real, dimension( ims:ime, kms:kme ), INTENT(OUT)    :: UST_WL
+      REAL, DIMENSION( ims:ime ), INTENT(OUT)    :: UST_RF, UST_ST
 !... Integer
-      INTEGER, DIMENSION( ims:ime ),       INTENT(OUT):: KLPBL
-      INTEGER,  INTENT(IN)      ::      XTIME
-      integer,  intent(in   )   ::      ids,ide, jds,jde, kds,kde, &
-                                        ims,ime, jms,jme, kms,kme, &
-                                        its,ite, jts,jte, kts,kte, j
+      INTEGER, DIMENSION( ims:ime ), INTENT(OUT) :: KLPBL
+      INTEGER, INTENT(IN)                        :: XTIME
+      INTEGER, INTENT(IN   )                     :: IFUACM
+      integer, intent(in)                        :: ids,ide, jds,jde, kds,kde, &
+                                                    ims,ime, jms,jme, kms,kme, &
+                                                    its,ite, jts,jte, kts,kte, j
 #if (WRF_CHEM == 1)
 !....Chem
-      INTEGER,  INTENT(IN)      ::      NCHEM, KDVEL,NDVEL,NUM_VERT_MIX
-      REAL , DIMENSION( ims:ime, kms:kme, NCHEM ), INTENT(INOUT)  :: CHEM
-      REAL , DIMENSION( ims:ime, KDVEL, NDVEL ), INTENT(IN)  :: VD
+      INTEGER,  INTENT(IN)      ::      NCHEM, KDVEL, NDVEL, NUM_VERT_MIX
+      REAL, DIMENSION( ims:ime, kms:kme, NCHEM ), INTENT(INOUT)  :: CHEM
+      REAL, DIMENSION( ims:ime, KDVEL, NDVEL ), INTENT(IN)       :: VD
 #endif
+
+!-- DDY urban
+      INTEGER, INTENT(IN)                              :: nlcat
+      REAL, DIMENSION( ims:ime, 1:nlcat ), INTENT(IN)  :: landusef
+      REAL, DIMENSION( ims:ime ), INTENT(IN)           :: COSZ, SWDOWN
+      REAL, DIMENSION( ims:ime ), INTENT(IN)           :: lamp, HGTBDG, lamf
+      INTEGER, DIMENSION( ims:ime ), INTENT(IN)        :: stdir1, stdir2
+      REAL, DIMENSION( ims:ime ), INTENT(IN)           :: blkw1, blkw2
+      logical :: restart
+
 !--------------------------------------------------------------------
 !--Local 
-      INTEGER I, K     
+      INTEGER :: I, K, M
       INTEGER :: KPBLHT
-      INTEGER, DIMENSION( its:ite ) :: KPBLH, NOCONV, KSRC
+      INTEGER, DIMENSION( its:ite ) :: KPBLH, NOCONV, KSRC, KSL
 
 !... Real
       REAL    ::  TVCON, WSS, TCONV, TH1, TOG, DTMP, WSSQ
       REAL    ::  ZH1,UH1,VH1                                   ! NEW FOR V3.7
       REAL    ::  psix, THV1
-      REAL, DIMENSION( its:ite )          :: FINT, PSTAR, CPAIR
+      REAL, DIMENSION( its:ite )          :: URBF
+      REAL, DIMENSION( its:ite,kts:kte, 1:2 )  :: IMU, EXU, IMV, EXV
+      REAL, DIMENSION( its:ite,kts:kte )       :: MIXLKZ
+      REAL, DIMENSION( its:ite )          :: FINT, PSTAR, CPAIR, QVS_CAN,        &
+                                             CPAIR_RF, CPAIR_CAN, DENSX_CAN
       REAL, DIMENSION( its:ite, kts:kte ) :: THETAV, RIB,                        &
                                              EDDYZ, EDDYZM, UX, VX, THETAX,      &
                                              QVX, QCX, QIX, ZA, DZHI, DZFI, DZH
       REAL, DIMENSION( its:ite, 0:kte )   :: ZF
-      REAL,    DIMENSION( its:ite)        :: WST, TST, QST, USTM, TSTV
-      REAL,    DIMENSION( its:ite )       :: MOL
-      REAL    ::  FINTT, ZMIX, UMIX, VMIX
-      REAL    ::  TMPFX, TMPVTCON, TMPP, TMPTHS, TMPTH1, TMPVCONV, WS1, DTH
-      REAL    ::  A,TST12,RL,ZFUNC,DENSF
+      REAL, DIMENSION( its:ite )          :: WST, TST, QST, USTM, TSTV,          &
+                                             TMPFX_RF, TMPFX_WL, MOISFX_RF
+      REAL, DIMENSION( its:ite )          :: MOL
+      REAL :: FINTT, ZMIX, UMIX, VMIX
+      REAL :: TMPFX, TMPVTCON, TMPP, TMPTHS, TMPTH1, TMPVCONV, WS1, DTH
+      REAL :: A, TST12, RL, ZFUNC, DENSF
+      REAL       :: TFXT, QFXT      ! For UTK urban
+
 
 !... Integer
-      INTEGER :: KL, jtf, ktf, itf, KMIX
+      INTEGER :: KL, jtf, ktf, itf, KMIX, CNP
+!...
+
+     !-- DDY-UTK urban
+      real :: LUTOT, GAMDIS
+      integer :: NL
+      LOGICAL, SAVE :: FIRSTIME = .TRUE.
+      LOGICAL :: eof
+      INTEGER :: stat, c2, r
+      REAL, DIMENSION( its:ite )          :: UST_CAN, USTT
+      LOGICAL :: ISPXURB
+
+!...
       character*512 :: message
+
+
+!---------Executables start here------------------
+!-------------------------------------------------
+
+
+      !--------------------------------------------------------------------------------------------------------------
+      !-- Condition to set the variable 'ISPXURB' for the domain of interest(Domain-4 here)
+      !-- DDY-UTK urban (*IMPORTANT NOTE*:-set the time step here for nested domain accord. to the main time step)
+
+      if (ifuacm .eq. 1) then
+          ispxurb = .true.
+      else
+          ispxurb = .false.
+      endif
+
 !-----initialize vertical tendencies and
 
       DO i = its,ite
@@ -344,47 +437,127 @@ CONTAINS
         ENDDO
       ENDDO
 
+      !-DDY urban
+
+      !-UTK urban
+      !-- Urban Roof and Wall fluxes initialization
+      DO i = its,ite
+        TMPFX_RF(i)  = 0.0
+        TMPFX_WL(i)  = 0.0
+        MOISFX_RF(i) = 0.0
+      ENDDO
+
+      IF (ISPXURB ) THEN
+        DO i = its,ite
+          !--DDY urban calculate urban fractions for USGS-landuse only (NOW)
+
+          URBF(I) = 0.0
+          LUTOT   = 0.0
+          DO NL = 1,NLCAT
+            LUTOT = LUTOT + LANDUSEF(I,NL)
+          ENDDO
+          IF (LUTOT .GT. 0.0) THEN
+!            URBF(I) = LANDUSEF(I,1)/LUTOT
+            URBF(I) = (LANDUSEF(I,24)+LANDUSEF(I,25)+LANDUSEF(I,26))/LUTOT  !-Only for NLCD40 here. 
+          ENDIF
+          IF(URBF(I).LT.0.05) URBF(I)=-1.0
+        ENDDO
+      ENDIF
+
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+!- Compute the height of full- and half-sigma level above ground level
+!- UTK urban
+!- Estimation of Urban Roof level Temp. & Mois. fluxes for ACM module
+
+        DO I = its,ite
+          ZF(I,0) = 0.0
+        ENDDO
+
+        DO K = kts,kte
+          DO I = its,ite
+            ZF(I,K) = DZF(I,K) + ZF(I,K-1)
+            ZA(I,K) = 0.5 * (ZF(I,K) + ZF(I,K-1))
+            !--DDY-UTK urban  ! Determine urban canopy layer
+            IF (ispxurb .AND. URBF(I) .GT. 0.0)  THEN
+!              IF ((h(I,j) .GE. ZF(I,K-1)).AND.(h(I,j) .LE. ZF(I,K))) THEN
+              IF ((HGTBDG(I) .GT. ZF(I,K-1)).AND.(HGTBDG(I) .LE. ZF(I,K))) THEN  ! temp hack to run without building data
+                GAMDIS = (HGTBDG(I) - ZF(I,K-1)) / DZF(I,K)
+                CNP = K
+                KSL(I) = CNP
+                CPAIR_RF(I)  = CPD * (1.0 + 0.84 * QVS(I,CNP))
+                TMPFX_RF(I)  = HFX_RF(I) / (CPAIR_RF(I) * DENSX(I,CNP))
+                MOISFX_RF(I) = QFX_RF(I) / DENSX(I,CNP)
+  
+                QVS_CAN(I)   = 0.0
+                DENSX_CAN(I) = 0.0
+                UST_CAN(I)   = 0.0
+                DO M = kts,CNP-1
+                  QVS_CAN(I)   = QVS_CAN(I) + QVS(I,M) * DZF(I,M)  
+                  DENSX_CAN(I) = DENSX_CAN(I) + DENSX(I,M) * DZF(I,M)
+                  UST_CAN(I) = UST_CAN(I) + UST_WL(I,M)**2 * DZF(I,M)
+                ENDDO
+                QVS_CAN(I)   = QVS_CAN(I) + QVS(I,CNP) * DZF(I,CNP)* GAMDIS
+                DENSX_CAN(I) = DENSX_CAN(I) + DENSX(I,CNP) * DZF(I,CNP)* GAMDIS
+                UST_CAN(I) = UST_CAN(I) + UST_WL(I,CNP)**2 * DZF(I,CNP)
+                QVS_CAN(I)   = QVS_CAN(I)/HGTBDG(I)   !ZF(I,CNP)
+                DENSX_CAN(I) = DENSX_CAN(I)/HGTBDG(I)   !ZF(I,CNP)
+                UST_CAN(I) = sqrt(UST_CAN(I)/HGTBDG(I))        !ZF(I,CNP) Fix on July 9, 2024
+                CPAIR_CAN(I) = CPD * (1.0 + 0.84 * QVS_CAN(I))    
+                TMPFX_WL(I)  = HFX_WL(I) / (CPAIR_CAN(I) * DENSX_CAN(I))
+              ENDIF
+            ENDIF
+          ENDDO
+        ENDDO
+
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 !!!  Compute Micromet Scaling variables, not availiable in WRF for ACM
      DO I = its,ite
-           CPAIR(I)  = CPD * (1.0 + 0.84 * QVS(I,1))                    ! J/(K KG)
-           TMPFX     = HFX(I)  / (cpair(i) * DENSX(I,1))
-           TMPVTCON  = 1.0 + EP1 * QVS(I,1)                             ! COnversion factor for virtual temperature
-           WS1       = SQRT(US(I,1)**2 + VS(I,1)**2)                    ! Level 1 wind speed
-           TST(I)    = -TMPFX / UST(I)
-           QST(I)    = -QFX(I) / (UST(I)*DENSX(I,1))
-           USTM(I)   = UST(I) * WS1 / wspd(i)
-           THV1      = TMPVTCON * THETA(I,1) 
-           TSTV(I)   = TST(I)*TMPVTCON + THV1*EP1*QST(I)
-           IF(ABS(TSTV(I)).LT.1.0E-6) THEN
-             TSTV(I) = SIGN(1.0E-6,TSTV(I))
-           ENDIF
-           MOL(I)    = THV1 * UST(i)**2/(KARMAN*G*TSTV(I))
-           RMOL(I)   = 1.0/MOL(I)
-           WST(I)    = UST(I) * (PBL(I)/(KARMAN*ABS(MOL(I)))) ** 0.333333       
-           PSTAR(I)  =  MUT(I)/1000.                                     ! P* in cb 
+        CPAIR(I)  = CPD * (1.0 + 0.84 * QVS(I,1))                    ! J/(K KG)
+        TMPFX     = HFX(I)  / (cpair(i) * DENSX(I,1))
+        TMPVTCON  = 1.0 + EP1 * QVS(I,1)                             ! COnversion factor for virtual temperature
+        WS1       = SQRT(US(I,1)**2 + VS(I,1)**2)                    ! Level 1 wind speed
+        TST(I)    = -TMPFX / UST(I)
+        QST(I)    = -QFX(I) / (UST(I)*DENSX(I,1))
+        USTM(I)   = UST(I) * WS1 / wspd(i)
+        THV1      = TMPVTCON * THETA(I,1) 
+        IF (ispxurb .AND. URBF(I) .GT. 0.0.and.HGTBDG(I) .GT.0.0) THEN
+          UST(I) = MAX(UST(I),UST_ST(I))   
+!          TSTT(I) = -(TMPFX+TMPFX_RF(I)) / UST(I) 
+          TFXT = -(TMPFX+TMPFX_RF(I) + TMPFX_WL(I))
+          QFXT = -(QFX(I)+QFX_RF(I)) / (DENSX(I,1))
+          TSTV(I) = TFXT*TMPVTCON + THV1*EP1*QFXT
+          USTT(I) = UST_CAN(I) + UST(I) + UST_RF(I)
+!          if (USTT(I).GT.100.) print *, 'UST(I),UST_CAN(I),UST_RF(I),HGTBDG(I),KSL(I)',  &
+!                                 UST(I),UST_CAN(I),UST_RF(I),HGTBDG(I),KSL(I)  
+          TSTV(I) = (TFXT*TMPVTCON + THV1*EP1*QFXT)/USTT(I)
+        ELSE
+          TSTV(I) = TST(I)*TMPVTCON + THV1*EP1*QST(I)
+          USTT(I) = UST(i)
+        ENDIF
+        IF (ABS(TSTV(I)) .LT. 1.0E-6) THEN
+          TSTV(I) = SIGN(1.0E-6,TSTV(I))
+        ENDIF
+        MOL(I)    = THV1 * USTT(I)**2/(KARMAN*G*TSTV(I))
+        RMOL(I)   = 1.0/MOL(I)
+        WST(I)    = USTT(I) * (PBL(I)/(KARMAN*ABS(MOL(I)))) ** 0.333333       
+        PSTAR(I)  = MUT(I)/1000.                                     ! P* in cb 
      ENDDO
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
 !... Compute PBL height
 
 !... compute the height of full- and half-sigma level above ground level
-     DO I = its,ite
-       ZF(I,0)    = 0.0
-       KLPBL(I)   = 1
-     ENDDO
 
-!     write(0,*) 'HHHHH2'
-     DO K = kts, kte
+     DO K = kts,kte
        DO I = its,ite
-         ZF(I,K) = DZF(I,K) + ZF(I,K-1)
-         ZA(I,K) = 0.5 * (ZF(I,K) + ZF(I,K-1))
          DZH(I,K) = ZF(I,K) - ZF(I,K-1)
          DZHI(I,K)= 1./DZH(I,K)
        ENDDO
      ENDDO
 
-     DO K = kts, kte-1
+     DO K = kts,kte-1
        DO I = its,ite
          DZFI(I,K) = 1./(ZA(I,K+1)-ZA(I,K))
        ENDDO
@@ -393,7 +566,7 @@ CONTAINS
        DZFI(I,KTE) = DZFI(I,KTE-1)
      ENDDO
 
-     DO K = kts, kte
+     DO K = kts,kte
        DO I = its,ite
          TVCON       = 1.0 + EP1 * QVS(I,K)
          THETAV(I,K) = THETA(I,K) * TVCON
@@ -406,7 +579,7 @@ CONTAINS
        DO K = 1,kte
          RIB(I,K) = 0.0
          KSRC(I) = K
-         IF (ZF(I,K).gt.30.0) GO TO 69
+         IF (ZF(I,K) .GT. 30.0) GO TO 69
        ENDDO
 69     CONTINUE 
 
@@ -425,8 +598,8 @@ CONTAINS
        UH1 = UH1/KSRC(I)
        VH1 = VH1/KSRC(I)
        IF(MOL(I).LT.0.0 .AND. XTIME.GT.1) then
-         WSS   = (UST(I) ** 3 + 0.6 * WST(I) ** 3) ** 0.33333
-         TCONV = -8.5 * UST(I) * TSTV(I) / WSS
+         WSS   = (USTT(I) ** 3 + 0.6 * WST(I) ** 3) ** 0.33333
+         TCONV = -8.5 * USTT(I) * TSTV(I) / WSS
          TH1   = TH1 + TCONV
        ENDIF
 
@@ -453,7 +626,7 @@ CONTAINS
               + (VS(I,K)-VMIX)**2
          IF (KMIX .EQ. KSRC(I)) THEN
                WSSQ = US(I,K)**2 + VS(I,K)**2
-               WSSQ = WSSQ + 100.*UST(I)*UST(I) 
+               WSSQ = WSSQ + 100.*USTT(I)*USTT(I) 
          ENDIF
          WSSQ = MAX( WSSQ, 0.1 )
          RIB(I,K) = ABS(ZA(I,K)-ZMIX) * DTMP / (TOG * WSSQ)
@@ -464,9 +637,9 @@ CONTAINS
        write (message,*)' RIBX never exceeds RIC, RIB(i,kte) = ',rib(i,5),        &
                ' THETAV(i,1) = ',thetav(i,1),' MOL=',mol(i),            &
                ' TCONV = ',TCONV,' WST = ',WST(I),                      &
-               ' KMIX = ',kmix,' UST = ',UST(I),                       &
+               ' KMIX = ',kmix,' USTT = ',USTT(I),                       &
                ' TST = ',TST(I),' U,V = ',US(I,1),VS(I,1),              &
-               ' I,J=',I,J
+               ' I,J=',I,J,'UF=',URBF(I),' TSTV=',TSTV(I)
        CALL wrf_error_fatal ( message )
 
 201    CONTINUE
@@ -494,12 +667,10 @@ CONTAINS
          KLPBL(I) = KSRC(I)
          PBL(I)    = ZA(I,KSRC(I))                                                  
        ENDIF
-
      ENDDO
 
      DO I = its,ite       
        NOCONV(I) = 0
-       
 ! Check for CBL and identify conv. vs. non-conv cells
        IF (PBL(I) / MOL(I) .LT. -0.02 .AND. KLPBL(I) .GT. 3        &
            .AND. THETAV(I,1) .GT. THETAV(I,2) .AND. XTIME .GT. 1) THEN
@@ -508,36 +679,57 @@ CONTAINS
        ENDIF
      ENDDO
 
+!--- DDY urban, to call ACMURB subroutine
+     restart = .false.
+     MIXLKZ = -1.0
+     if(ispxurb) then
+       CALL ACMURB(COSZ, SWDOWN, CPD,                               &
+                   DZF, NLCAT, LANDUSEF, DENSX,                     &
+                   THETAV, ZA,                                      &
+                   US, VS, THETA, XTIME, DTPBL, restart,            &
+                   MIXLKZ, IMU, EXU, IMV, EXV,                      & !--DDY urban 
+                   UST_WL,UST_RF,UST_ST,                            &
+                   ispxurb,lamp, HGTBDG, lamf,                      &
+                   stdir1,stdir2,blkw1,blkw2,                       &
+                   ims,ime, kms,kme, jms,jme, its,ite, kts,kte,j)
+     endif
+
 !... Calculate Kz
-     CALL EDDYX(DTPBL, ZF,  ZA,     MOL, PBL,  UST,                 &
+     CALL EDDYX(DTPBL, ZF,  ZA, MOL, PBL, UST, USTT, UST_WL,UST_RF,UST_ST,  &
                 US,    VS,  TT,  THETAV, DENSX, PSTAR,              &
                 QVS,   QCS, QIS, G, RD, CPAIR,                      &
-                EDDYZ, EDDYZM, its,ite, kts,kte,ims,ime, kms,kme)
+                EDDYZ, EDDYZM,                                      &
+                MIXLKZ, ispxurb, KSL,                               & !--DDY urban
+                its,ite, kts,kte, ims,ime, kms,kme)
 
      CALL ACM(DTPBL, PSTAR,  NOCONV, ZF, DZH, DZHI, J,              &
-                 KLPBL, PBL,   DZFI, MOL,  UST,                     &
-                 TST, QST,  USTM,   EDDYZ,  DENSX,                  &
-                 THETA,  QVS,    QCS,    QIS,                       &
-                 THETAX, QVX,    QCX,    QIX,                       &
+              KLPBL, PBL,   DZFI, MOL,  UST,                        &
+              TST, QST,  USTM,   EDDYZ,  DENSX, DENSX_CAN,          &
+              THETA,  QVS,    QCS,    QIS,                          &
+              THETAX, QVX,    QCX,    QIX,                          &
 #if (WRF_CHEM == 1)
-                 CHEM,  VD,  NCHEM, KDVEL, NDVEL,NUM_VERT_MIX,      &
+              CHEM,  VD,  NCHEM, KDVEL, NDVEL, NUM_VERT_MIX,        &
 #endif
-                 ids,ide, jds,jde, kds,kde,                         &
-                 ims,ime, jms,jme, kms,kme,                         &
-                 its,ite, jts,jte, kts,kte)
+              TMPFX_RF, TMPFX_WL, MOISFX_RF, XTIME, ispxurb,        & !DDY-UTK urban
+              NLCAT, LANDUSEF, LAMP, HGTBDG, LAMF,                  &
+              ids,ide, jds,jde, kds,kde,                            &
+              ims,ime, jms,jme, kms,kme,                            &
+              its,ite, jts,jte, kts,kte)
+
      CALL ACMM(DTPBL, PSTAR,  NOCONV, ZF, DZH, DZHI, J,             &
-                 KLPBL, PBL,   DZFI, MOL,  UST,                     &
-                 TST, QST,  USTM,  EDDYZM, DENSX,                   &
-                 US,    VS,         &
-                 UX,    VX,         &
-                 ids,ide, jds,jde, kds,kde,                         &
-                 ims,ime, jms,jme, kms,kme,                         &
-                 its,ite, jts,jte, kts,kte)
+               KLPBL, PBL,   DZFI, MOL,  UST,                       &
+               TST, QST,  USTM,  EDDYZM, DENSX,                     &
+               US,    VS,                                           &
+               UX,    VX,                                           &
+               IMU, EXU, IMV, EXV, URBF, XTIME, ispxurb,            & !DDY urban
+               ids,ide, jds,jde, kds,kde,                           &
+               ims,ime, jms,jme, kms,kme,                           &
+               its,ite, jts,jte, kts,kte)
 
 !.. Load exch_h for use in CCN activation
 
-     DO K = kts, kte-1
-       DO I = its, ite
+     DO K = kts,kte-1
+       DO I = its,ite
          exch_hx(I,K) = EDDYZ(I,K)
          exch_mx(I,K) = EDDYZM(I,K)
        ENDDO
@@ -545,8 +737,8 @@ CONTAINS
 
 !... Calculate tendency due to PBL parameterization
 
-     DO K = kts, kte
-       DO I = its, ite
+     DO K = kts,kte
+       DO I = its,ite
          UTNP(I,K)  = UTNP(I,K) + (UX(I,K) - US(I,K)) * RDT
          VTNP(I,K)  = VTNP(I,K) + (VX(I,K) - VS(I,K)) * RDT
          TTNP(I,K)  = TTNP(I,K) + (THETAX(I,K) - THETA(I,K)) * RDT
@@ -580,20 +772,20 @@ CONTAINS
 !
 !-----------------------------------------------------------------------
 !-----------------------------------------------------------------------
-     IMPLICIT NONE
+   IMPLICIT NONE
 !
-   LOGICAL , INTENT(IN)          :: restart , allowed_to_read
+   LOGICAL, INTENT(IN)          :: restart , allowed_to_read
 
-   INTEGER , INTENT(IN)          ::  ids, ide, jds, jde, kds, kde, &
-                                     ims, ime, jms, jme, kms, kme, &
-                                     its, ite, jts, jte, kts, kte
+   INTEGER, INTENT(IN)          :: ids, ide, jds, jde, kds, kde,   &
+                                   ims, ime, jms, jme, kms, kme,   &
+                                   its, ite, jts, jte, kts, kte
 
-   INTEGER , INTENT(IN)          ::  P_QI,P_FIRST_SCALAR
+   INTEGER, INTENT(IN)          :: P_QI,P_FIRST_SCALAR
 
-!   REAL , DIMENSION( kms:kme ), INTENT(IN)  :: SHALF
-   REAL , DIMENSION( ims:ime , kms:kme , jms:jme ) , INTENT(OUT) ::         &
-                                                         RUBLTEN, &
-                                                         RVBLTEN, &
+!   REAL, DIMENSION( kms:kme ), INTENT(IN)  :: SHALF
+   REAL, DIMENSION( ims:ime , kms:kme , jms:jme ), INTENT(OUT) ::  &
+                                                         RUBLTEN,  &
+                                                         RVBLTEN,  &
                                                          RTHBLTEN, &
                                                          RQVBLTEN, &
                                                          RQCBLTEN, & 
@@ -638,10 +830,12 @@ CONTAINS
 
 !-----------------------------------------------------------------------
 !-------------------------------------------------------------------          
-   SUBROUTINE EDDYX(DTPBL, ZF,  ZA,     MOL, PBL,  UST,               &
+   SUBROUTINE EDDYX(DTPBL, ZF,  ZA, MOL, PBL, UST,USTT, UST_WL,UST_RF,UST_ST, &
                     US,    VS,  TT,  THETAV, DENSX, PSTAR,            &
                     QVS,   QCS, QIS, G, RD, CPAIR,                    &
-                    EDDYZ, EDDYZM, its,ite, kts,kte,ims,ime,kms,kme )
+                    EDDYZ, EDDYZM,                                    &
+                    MIXLKZ,   ispxurb,  KSL,                          & !-- DDY urban
+                    its,ite, kts,kte, ims,ime, kms,kme )
 
 
 !**********************************************************************
@@ -680,18 +874,22 @@ CONTAINS
 !.......Arguments
   
 !... Integer
-      INTEGER,  INTENT(IN)   ::    its,ite, kts,kte,ims,ime,kms,kme
+      INTEGER, INTENT(IN)   :: its, ite, kts, kte, ims, ime, kms, kme
 !... Real
-      REAL , DIMENSION( ims:ime ),          INTENT(IN)  :: PBL, UST
-      REAL ,                                INTENT(IN)  :: DTPBL, G, RD
-      REAL , DIMENSION( its:ite ),          INTENT(IN)  :: MOL, PSTAR, CPAIR
+      REAL, DIMENSION( ims:ime ),          INTENT(IN)    :: PBL, UST, UST_RF, UST_ST
+      REAL,                                INTENT(IN)    :: DTPBL, G, RD
+      REAL, DIMENSION( its:ite ),          INTENT(IN)    :: MOL, PSTAR, CPAIR, USTT
 
-      REAL , DIMENSION( ims:ime, kms:kme ), INTENT(IN)  :: US,VS, TT,   &
-                                                           QVS, QCS, QIS, DENSX
-      REAL, DIMENSION( its:ite, kts:kte ), INTENT(IN) :: ZA, THETAV
-      REAL, DIMENSION( its:ite, 0:kte )  , INTENT(IN) :: ZF
+      REAL, DIMENSION( ims:ime, kms:kme ), INTENT(IN)    :: US,VS, TT,   &
+                                                            QVS, QCS, QIS, DENSX, UST_WL
+      REAL, DIMENSION( its:ite, kts:kte ), INTENT(IN)    :: ZA, THETAV
+      REAL, DIMENSION( its:ite, 0:kte ),   INTENT(IN)    :: ZF
       
-      REAL , DIMENSION( its:ite, kts:kte ), INTENT(OUT) :: EDDYZ,EDDYZM
+      REAL, DIMENSION( its:ite, kts:kte ), INTENT(OUT)   :: EDDYZ,EDDYZM
+
+      !-- DDY urban 
+      REAL, DIMENSION( its:ite, kts:kte ), INTENT(INOUT) :: MIXLKZ
+      INTEGER, DIMENSION( its:ite ),       INTENT(IN)    :: KSL
 
 !.......Local variables
 
@@ -702,19 +900,21 @@ CONTAINS
       REAL     :: ZOVL, PHIH, WT, ZSOL, ZFUNC, DZF, SS, GOTH, EDYZ
       REAL     :: RI, QMEAN, TMEAN, XLV, ALPH, CHI, ZK, SQL, DENSF, KZO
       REAL     :: FH, FM
-      REAL     :: WM, EDYZM, PHIM
+      REAL     :: WM, EDYZM, PHIM, USTK, MIXWL
 !... Parameters
       REAL, PARAMETER :: RV     = 461.5
       REAL, PARAMETER :: RC     = 0.25
       REAL, PARAMETER :: RLAM   = 80.0
-      REAL, PARAMETER :: GAMH   = 16.0 !Dyer74 !15.0  !  Holtslag and Boville (1993)
-      REAL, PARAMETER :: GAMM   = 16.0 !Dyer74
-      REAL, PARAMETER :: BETAH  = 5.0   !  Holtslag and Boville (1993)  BETAM = BETAH
+      REAL, PARAMETER :: GAMH   = 16.0  ! Dyer74 !15.0  !  Holtslag and Boville (1993)
+      REAL, PARAMETER :: GAMM   = 16.0  ! Dyer74
+      REAL, PARAMETER :: BETAH  = 5.0   ! Holtslag and Boville (1993)  BETAM = BETAH
       REAL, PARAMETER :: KARMAN = 0.4
       REAL, PARAMETER :: P      = 2.0   ! ZFUNC exponent
       REAL, PARAMETER :: EDYZ0  = 0.01  ! New Min Kz
       REAL, PARAMETER :: PR     = 0.8   ! Prandtl #
+      REAL, PARAMETER :: WSTT   = 20.0   !m
       INTEGER, PARAMETER :: imvdif = 1
+      logical, intent(in) :: ispxurb
 !
       ILX = ite 
       KL  = kte
@@ -726,6 +926,18 @@ CONTAINS
           ZOVL = 0.0
           DZF  = ZA(I,K+1) - ZA(I,K)
           KZO = EDYZ0
+          IF(ispxurb) THEN
+            IF(K.LT.KSL(I)) THEN
+               USTK = UST_WL(I,K) + UST(I)  
+            ELSE 
+               USTK = USTT(I)
+            ENDIF
+          ELSE
+            USTK = UST(I)
+          ENDIF
+          MIXLKZ(I,K) = KARMAN * ZF(I,K)
+          MIXWL = 0.0
+          IF(ispxurb) MIXWL = 1./(1./ZF(I,K) + 1./WSTT)     
 !--------------------------------------------------------------------------
           IF (ZF(I,K) .LT. PBL(I)) THEN
             ZOVL = ZF(I,K) / MOL(I)
@@ -733,29 +945,32 @@ CONTAINS
               IF (ZF(I,K) .LT. 0.1 * PBL(I)) THEN
                 PHIH = 1.0 / SQRT(1.0 - GAMH * ZOVL)
                 PHIM = (1.0 - GAMM * ZOVL)**(-0.25)
-                WT   = UST(I) / PHIH
-                WM   = UST(I) / PHIM
+                WT   = USTK / PHIH
+                WM   = USTK / PHIM
               ELSE
                 ZSOL = 0.1 * PBL(I) / MOL(I)
                 PHIH = 1.0 / SQRT(1.0 - GAMH * ZSOL)
                 PHIM = (1.0 - GAMM * ZSOL)**(-0.25)
-                WT   = UST(I) / PHIH
-                WM   = UST(I) / PHIM
+                WT   = USTK / PHIH
+                WM   = USTK / PHIM
               ENDIF
             ELSE IF (ZOVL .LT. 1.0) THEN
               PHIH = 1.0 + BETAH * ZOVL
-              WT   = UST(I) / PHIH
+              WT   = USTK / PHIH
               WM   = WT
             ELSE
               PHIH = BETAH + ZOVL
-              WT   = UST(I) / PHIH
+              WT   = USTK / PHIH
               WM   = WT
             ENDIF
-            ZFUNC      = ZF(I,K) * (1.0 - ZF(I,K) / PBL(I)) ** P
-            EDYZ = KARMAN * WT * ZFUNC
-            EDYZM = KARMAN * WM * ZFUNC
+            !-- DDY, mixing length profile
+
+            ZFUNC = MIXLKZ(I,K)* (1.0 - ZF(I,K) / PBL(I)) ** P
+
+            EDYZ  = WT * ZFUNC
+            EDYZM = WM * ZFUNC
           ENDIF
-!--------------------------------------------------------------------------!--------------------------------------------------------------------------
+!--------------------------------------------------------------------------
           SS   = ((US(I,K+1) - US(I,K)) ** 2 + (VS(I,K+1) - VS(I,K)) ** 2)   &
                   / (DZF * DZF) + 1.0E-9
           GOTH = 2.0 * G / (THETAV(I,K+1) + THETAV(I,K))
@@ -776,17 +991,26 @@ CONTAINS
           ENDIF
 !--------------------------------------------------------------------------
             
-          ZK  = 0.4 * ZF(I,K)
-          SQL = (ZK * RLAM / (RLAM + ZK)) ** 2
+          !-- DDY (01/2016)
+          SQL = (MIXLKZ(I,K) * RLAM / (RLAM + MIXLKZ(I,K))) ** 2
             
           IF (RI .GE. 0.0) THEN
-            FH=1./(1.+10.*RI+50.*RI**2+5000.*RI**4)+0.0012  !pleim5
-            FM= PR*FH + 0.00104
+            FH = 1./(1.+10.*RI+50.*RI**2+5000.*RI**4)+0.0012  !pleim5
+            FM = PR*FH + 0.00104
 
-            EDDYZ(I,K) = KZO + SQRT(SS) * FH * SQL
-            EDDYZM(I,K) = KZO + SQRT(SS) * FM * SQL
+            if(K.EQ.KSL(I)) then
+              EDDYZ(I,K) = KZO + SQRT(SS) * FH * SQL + (UST_WL(I,K)+UST_RF(I)) * MIXWL
+              EDDYZM(I,K) = KZO + SQRT(SS) * FM * SQL + (UST_WL(I,K)+UST_RF(I)) * MIXWL
+            else
+              EDDYZ(I,K) = KZO + SQRT(SS) * FH * SQL + UST_WL(I,K) * MIXWL
+              EDDYZM(I,K) = KZO + SQRT(SS) * FM * SQL + UST_WL(I,K) * MIXWL
+            endif
           ELSE
-            EDDYZ(I,K) = KZO + SQRT(SS * (1.0 - 25.0 * RI)) * SQL
+            if(K.EQ.KSL(I)) then
+              EDDYZ(I,K) = KZO + SQRT(SS * (1.0 - 25.0 * RI)) * SQL + (UST_WL(I,K)+UST_RF(I))*MIXWL
+            else
+              EDDYZ(I,K) = KZO + SQRT(SS * (1.0 - 25.0 * RI)) * SQL + UST_WL(I,K)*MIXWL
+            endif
             EDDYZM(I,K) = EDDYZ(I,K) * PR
           ENDIF
   
@@ -814,18 +1038,20 @@ CONTAINS
 
 !-----------------------------------------------------------------------
 !-------------------------------------------------------------------          
-   SUBROUTINE ACM (DTPBL, PSTAR,  NOCONV, ZF, DZH, DZHI, JX,       &
-                   KLPBL, PBL,   DZFI, MOL,  UST,                  &
-                   TST, QST,  USTM,   EDDYZ,  DENSX,               &
-                   THETA,  QVS,    QCS,    QIS,                    &
-                   THETAX, QVX,    QCX,    QIX,                    &
+   SUBROUTINE ACM(DTPBL, PSTAR,  NOCONV, ZF, DZH, DZHI, JX,       &
+                  KLPBL, PBL,   DZFI, MOL,  UST,                  &
+                  TST, QST,  USTM,   EDDYZ,  DENSX, DENSX_CAN,    &
+                  THETA,  QVS,    QCS,    QIS,                    &
+                  THETAX, QVX,    QCX,    QIX,                    &
 #if (WRF_CHEM == 1)
-                   CHEM,  VD, NCHEM, KDVEL, NDVEL,                 &
-                   NUM_VERT_MIX,                                   &
+                  CHEM,  VD, NCHEM, KDVEL, NDVEL,                 &
+                  NUM_VERT_MIX,                                   &
 #endif
-                   ids,ide, jds,jde, kds,kde,                      &
-                   ims,ime, jms,jme, kms,kme,                      &
-                   its,ite, jts,jte, kts,kte)
+                  TMPFX_RF, TMPFX_WL, MOISFX_RF, XTIME, ispxurb,  & !DDY-UTK urban
+                  NLCAT, LANDUSEF, LAMP, HGTBDG, LAMF,            &
+                  ids,ide, jds,jde, kds,kde,                      &
+                  ims,ime, jms,jme, kms,kme,                      &
+                  its,ite, jts,jte, kts,kte)
 !**********************************************************************
 !   PBL model called the Asymmetric Convective Model, Version 2 (ACM2) 
 !   -- See top of module for summary and references
@@ -879,29 +1105,45 @@ CONTAINS
 !... Integer
       INTEGER,  INTENT(IN)      ::      ids,ide, jds,jde, kds,kde, &
                                         ims,ime, jms,jme, kms,kme, &
-                                        its,ite, jts,jte, kts,kte, JX
+                                        its,ite, jts,jte, kts,kte, &
+                                        JX, XTIME
       INTEGER,  DIMENSION( its:ite ), INTENT(IN)  :: NOCONV
       INTEGER,  DIMENSION( ims:ime ), INTENT(IN)  :: KLPBL
 
 !... Real
-      REAL , DIMENSION( ims:ime ),          INTENT(IN)  :: PBL, UST
-      REAL ,                                INTENT(IN)  :: DTPBL
-      REAL , DIMENSION( its:ite ),          INTENT(IN)  :: PSTAR,    &
-                                                           MOL, TST, &
-                                                           QST, USTM
-      REAL , DIMENSION( its:ite, kts:kte ), INTENT(IN)  :: DZHI, DZH, DZFI
-      REAL , DIMENSION( its:ite, 0:kte ),   INTENT(IN)  :: ZF
-      REAL , DIMENSION( its:ite, kts:kte ), INTENT(INOUT)  :: EDDYZ
-      REAL , DIMENSION( ims:ime, kms:kme ), INTENT(IN)  :: THETA,   &
-                                                           QVS, QCS, QIS, DENSX
-      REAL , DIMENSION( its:ite, kts:kte ), INTENT(OUT) :: THETAX,      &
-                                                           QVX, QCX, QIX
+      REAL, DIMENSION( ims:ime ),          INTENT(IN)    :: PBL, UST
+      REAL,                                INTENT(IN)    :: DTPBL
+      REAL, DIMENSION( its:ite ),          INTENT(IN)    :: PSTAR,    &
+                                                            MOL, TST, &
+                                                            QST, USTM
+      REAL, DIMENSION( ims:ime ),          INTENT(IN)    :: LAMP, HGTBDG, LAMF
+      REAL, DIMENSION( its:ite, kts:kte ), INTENT(IN)    :: DZHI, DZH, DZFI
+      REAL, DIMENSION( its:ite, 0:kte ),   INTENT(IN)    :: ZF
+      REAL, DIMENSION( its:ite, kts:kte ), INTENT(INOUT) :: EDDYZ
+      REAL, DIMENSION( ims:ime, kms:kme ), INTENT(IN)    :: THETA,    &
+                                                            QVS, QCS, QIS, DENSX
+      REAL, DIMENSION( its:ite, kts:kte ), INTENT(OUT)   :: THETAX,   &
+                                                            QVX, QCX, QIX
 #if (WRF_CHEM == 1)
 !......Chem
       INTEGER,  INTENT(IN)      ::   NCHEM, KDVEL, NDVEL, NUM_VERT_MIX
-      REAL , DIMENSION( ims:ime, kms:kme, nchem ), INTENT(INOUT)  :: CHEM   
-      REAL , DIMENSION( ims:ime, KDVEL, NDVEL ), INTENT(IN)  :: VD
+      REAL, DIMENSION( ims:ime, kms:kme, nchem ), INTENT(INOUT) :: CHEM   
+      REAL, DIMENSION( ims:ime, KDVEL, NDVEL ), INTENT(IN)      :: VD
 #endif
+
+!-- UTK urban
+      REAL, DIMENSION( its:ite ), INTENT(IN)     :: DENSX_CAN, TMPFX_RF, TMPFX_WL, MOISFX_RF
+      INTEGER, INTENT(IN) :: NLCAT
+      REAL, DIMENSION( ims:ime,1:NLCAT ), INTENT(IN)  :: LANDUSEF
+      INTEGER, DIMENSION( its:ite )  :: KSL, URBF
+      logical, intent(in) :: ispxurb
+      INTEGER :: CNP
+
+      LOGICAL, SAVE :: FIRSTIME = .TRUE.
+      LOGICAL :: eof
+      INTEGER :: stat, c2, r
+      REAL :: BBDG, WSTT, RBPW, RFFRC, LUTOT
+
 !.......Local variables
 
 !... Parameters
@@ -919,18 +1161,22 @@ CONTAINS
       REAL                               :: MBMAX, HOVL, MEDDY, MBAR
       REAL                               :: EKZ, RZ, FM, WSPD, DTS, DTRAT, F1
       REAL, DIMENSION( its:ite )         :: PSTARI, FSACM, DTLIM
-      REAL, DIMENSION( kts:kte, its:ite) :: MBARKS, MDWN
+      REAL, DIMENSION( kts:kte, its:ite) :: MBARKS, MDWN, VRF, NFRF
       REAL, DIMENSION( kts:kte )         :: XPLUS, XMINUS
-      REAL  DELC
+      REAL                               :: DELC
       REAL, DIMENSION( kts:kte )                :: AI, BI, CI, EI
       REAL, ALLOCATABLE, DIMENSION( : , : )     :: DI, UI    
       REAL, ALLOCATABLE, DIMENSION( : , : )     :: FS
       REAL, ALLOCATABLE, DIMENSION( : , : , : ) :: VCI
+      REAL, ALLOCATABLE, DIMENSION( : , : )     :: FS_RF     ! Urban roof fluxes
+      REAL, ALLOCATABLE, DIMENSION( : , : )     :: FS_WL     ! Urban wall fluxes
 
       CHARACTER*80 :: message
-
+      REAL CVOL
 !
-!--Start Exicutable ----
+!--Start Executables ----
+
+!-----
 
       ILX = ite
       KL  = kte
@@ -945,15 +1191,59 @@ CONTAINS
 !...Allocate species variables
       ALLOCATE (DI( 1:NSPX,kts:kte ))       
       ALLOCATE (UI( 1:NSPX,kts:kte ))  
-      ALLOCATE (FS( 1:NSPX, its:ite )) 
-      ALLOCATE (VCI( 1:NSPX,its:ite,kts:kte  ))
+      ALLOCATE (FS( 1:NSPX,its:ite )) 
+      ALLOCATE (VCI( 1:NSPX,its:ite,kts:kte ))
+      ALLOCATE (FS_RF( 1:NSPX,its:ite ))
+      ALLOCATE (FS_WL( 1:NSPX,its:ite ))
 
 !---COMPUTE ACM MIXING RATE
-      DO I = its, ILX
+      DO I = its,ILX
         DTLIM(I)  = DTPBL
         PSTARI(I) = 1.0 / PSTAR(I)
         KCBL(I)   = 1
         FSACM(I)  = 0.0
+
+        !--DDY urban calculate urban fractions for USGS-landuse only (NOW)
+        URBF(I) = 0.0
+        LUTOT   = 0.0
+        DO NL = 1,NLCAT
+          LUTOT = LUTOT + LANDUSEF(I,NL)
+        ENDDO
+        IF (LUTOT .GT. 0.0) THEN
+!          URBF(I) = LANDUSEF(I,1)/LUTOT
+          URBF(I) = (LANDUSEF(I,24)+LANDUSEF(I,25)+LANDUSEF(I,26))/LUTOT  !-Only for NLCD40 here. 
+        ENDIF
+        IF(URBF(I).LT.0.05) URBF(I)=-1.0
+        !-- Estimation of the Urban canopy height level (Model-level)
+        IF (ISPXURB .AND. (URBF(I) .GT. 0.0)) THEN   !temp hack for testing
+          DO K = kts,kte
+            IF (HGTBDG(I) .LE. ZF(I,K) .AND. HGTBDG(I) .GE. ZF(I,K-1)) THEN
+              KSL(I) = K
+            ENDIF
+          ENDDO
+        ENDIF
+! Adjustment for volume in urban canopies
+         DO K = kts,kte    
+           VRF(K,I) =1.0
+           NFRF(K,I) = 1.0 
+        ENDDO
+        IF (ispxurb .AND. URBF(I) .GT. 0.0) THEN
+          CNP = KSL(I)   
+          RFFRC = LAMP(I)*URBF(I)
+!          FS(1,I) = (1.-RFFRC)*FS(1,I)
+!          FS(2,I) = (1.-RFFRC)*FS(2,I)
+          DO K = kts,kte  
+            IF( K.LT.CNP) then
+               VRF(K,I) = 1. -RFFRC
+               NFRF(K,I) = 1. -RFFRC
+            ELSE
+               VRF(K,I) =1.0
+               NFRF(K,I) = 1.0 
+            ENDIF 
+          ENDDO
+          VRF(cnp,i) = 1. -(HGTBDG(I)-ZF(I,cnp-1))*DZHI(I,cnp)*RFFRC
+!          NFRF(cnp)=VRF(cnp)
+        ENDIF
 
         IF (NOCONV(I) .EQ. 1) THEN
           KCBL(I) = KLPBL(I)
@@ -962,13 +1252,25 @@ CONTAINS
 !--New couple ACM & EDDY-------------------------------------------------------------
           HOVL     = -PBL(I) / MOL(I)
           FSACM(I) = 1./(1.+((KARMAN/(HOVL))**0.3333)/(0.72*KARMAN))
-          MEDDY    = EDDYZ(I,1) * DZFI(i,1) / (PBL(I) - ZF(i,1))
+        IF (ispxurb .AND. URBF(I) .GT. 0.0) THEN
+          IF(KCBL(I).gt.CNP)THEN 
+            CVOL = (PBL(I) - ZF(i,1)) - RFFRC*(HGTBDG(I)-ZF(i,1))
+          ELSEIF (KCBL(I).eq.CNP) Then
+            CVOL = DZH(I,CNP)*VRF(CNP,I) + (ZF(i,cnp-1) - ZF(i,1)) * (1. -RFFRC)
+          ELSE
+            CVOL = (PBL(I) - ZF(i,1)) * (1. -RFFRC)
+          endif
+        else
+          CVOL = (PBL(I) - ZF(i,1))
+        endif
+          MEDDY    = EDDYZ(I,1) * DZFI(i,1)/VRF(1,I) / CVOL
           MBAR     = MEDDY * FSACM(I)
           DO K = kts,KCBL(I)-1
             EDDYZ(I,K) = EDDYZ(I,K) * (1.0 - FSACM(I))
           ENDDO
 
           MBMAX = AMAX1(MBMAX,MBAR)
+
           DO K = kts+1,KCBL(I)
             MBARKS(K,I) = MBAR
             MDWN(K,I)   = MBAR * (PBL(I) - ZF(i,K-1)) * DZHI(i,K)
@@ -977,6 +1279,7 @@ CONTAINS
           MBARKS(KCBL(I),I) = MDWN(KCBL(I),I)
           MDWN(KCBL(I)+1,I) = 0.0
         ENDIF
+
       ENDDO                              ! end of I loop
 
       DO K = kts,KLM
@@ -1003,7 +1306,7 @@ CONTAINS
           VCI(3,I,K) = QCS(I,K)
           VCI(4,I,K) = QIS(I,K)
 #if (WRF_CHEM == 1)
-          DO L= NSP+1, NSPX
+          DO L = NSP+1, NSPX
              VCI(L,I,K) = CHEM(I,K,L-NSP)
           ENDDO
 #endif
@@ -1016,22 +1319,38 @@ CONTAINS
         FS(3,I) = 0.0
         FS(4,I) = 0.0                      ! SURFACE FLUXES OF CLOUD WATER AND ICE = 0
 #if (WRF_CHEM == 1)
-        DO L= NSP+1, NSPX
+        DO L = NSP+1, NSPX
           FS(L,I) = -VD(I,1,L-NSP) * CHEM(I,1,L-NSP)
         ENDDO
 #endif
       ENDDO
-!
+
+      !-- UTK urban
+      DO I = its,ILX
+        IF (ispxurb .AND. URBF(I) .GT. 0.0) THEN
+          FS_RF(1,I) = TMPFX_RF(I) !* DENSX(I,CNP) * PSTARI(I)
+          FS_RF(2,I) = MOISFX_RF(I) !* DENSX(I,CNP) * PSTARI(I)
+          FS_RF(3,I) = 0.0
+          FS_RF(4,I) = 0.0               ! ROOF FLUXES OF CLOUD WATER AND ICE = 0
+
+          FS_WL(1,I) = TMPFX_WL(I) !* DENSX_CAN(I) * PSTARI(I)
+          FS_WL(2,I) = 0.0
+          FS_WL(3,I) = 0.0
+          FS_WL(4,I) = 0.0               ! WALL FLUXES OF MOISTURE, CLOUD WATER AND ICE = 0 
+        ENDIF
+      ENDDO
+
+
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
       DO I = its,ILX      
-
+        CNP = KSL(I)
         NLP   = INT(DTPBL / DTLIM(I) + 1.0)
         DTS   = (DTPBL / NLP)
         DTRAT = DTS / DTPBL
+
         DO NL = 1,NLP           ! LOOP OVER SUB TIME LOOP              
 
 !-- COMPUTE ARRAY ELEMENTS THAT ARE INDEPENDANT OF SPECIES
-
           DO K = kts,kte
             AI(K) = 0.0
             BI(K) = 0.0
@@ -1040,31 +1359,31 @@ CONTAINS
           ENDDO
 
           DO K = 2, KCBL(I)
-            EI(K-1) = -CRANKP * MDWN(K,I) * DTS * DZH(i,K) * DZHI(i,K-1)
-            BI(K)   = 1.0 + CRANKP * MDWN(K,I) * DTS
-            AI(K)   = -CRANKP * MBARKS(K,I) * DTS
+            EI(K-1) = -CRANKP * MDWN(K,I) * DTS * DZH(i,K) * DZHI(i,K-1) !* NFRF(k-1) / VRF(k-1)
+            BI(K)   = 1.0 + CRANKP * MDWN(K,I) * DTS !* NFRF(k-1) / VRF(k)
+            AI(K)   = -CRANKP * MBARKS(K,I) * DTS !* NFRF(1) / VRF(k)
           ENDDO
 
-          EI(1) = EI(1) -EDDYZ(I,1) * CRANKP * DZHI(i,1) * DZFI(i,1) * DTS
-          AI(2) = AI(2) -EDDYZ(I,1) * CRANKP * DZHI(i,2) * DZFI(i,1) * DTS
+          EI(1) = EI(1) -EDDYZ(I,1) * CRANKP * DZHI(i,1) * DZFI(i,1) * DTS * NFRF(1,I) / VRF(1,I)
+          AI(2) = AI(2) -EDDYZ(I,1) * CRANKP * DZHI(i,2) * DZFI(i,1) * DTS * NFRF(1,I) / VRF(2,I)
 
           DO K =  KCBL(I)+1, KL
             BI(K) = 1.0
           ENDDO
 
           DO K = 2,KL
-            XPLUS(K)  = EDDYZ(I,K) * DZHI(i,K) * DZFI(i,K) * DTS
-            XMINUS(K) = EDDYZ(I,K-1) * DZHI(i,K) * DZFI(i,K-1) * DTS
+            XPLUS(K)  = EDDYZ(I,K) * DZHI(i,K) * DZFI(i,K) * DTS * NFRF(K,I) / VRF(K,I)
+            XMINUS(K) = EDDYZ(I,K-1) * DZHI(i,K) * DZFI(i,K-1) * DTS * NFRF(k-1,I) / VRF(K,I)
             CI(K)     = - XMINUS(K) * CRANKP
             EI(K)     = EI(K) - XPLUS(K) * CRANKP
             BI(K)     = BI(K) + XPLUS(K) * CRANKP + XMINUS(K) * CRANKP
           ENDDO
 
           IF (NOCONV(I) .EQ. 1) THEN
-            BI(1) = 1.0 + CRANKP * MBARKS(1,I) * (PBL(I) - ZF(i,1)) * DTS   &
-                  * DZHI(i,1) + EDDYZ(I,1) * CRANKP * DZHI(i,1) * DZFI(i,1) * DTS
+            BI(1) = 1.0 + CRANKP * MBARKS(1,I) * (PBL(I)-ZF(i,1)) * DTS *DZHI(i,1) &
+                        + EDDYZ(I,1) * CRANKP * DZHI(i,1) * DZFI(i,1) * DTS * NFRF(1,I) / VRF(1,I)
           ELSE
-            BI(1) = 1.0  + EDDYZ(I,1) * CRANKP * DZHI(i,1) * DZFI(i,1) * DTS
+            BI(1) = 1.0 + EDDYZ(I,1) * CRANKP * DZHI(i,1) * DZFI(i,1) * DTS * NFRF(1,I) / VRF(1,I)
           ENDIF
 
 
@@ -1077,9 +1396,9 @@ CONTAINS
 !**   COMPUTE TENDENCY OF CBL CONCENTRATIONS - SEMI-IMPLICIT SOLUTION
           DO K = 2,KCBL(I)
             DO L = 1,NSPX                    
-              DELC = DTS * (MBARKS(K,I) * VCI(L,I,1) - MDWN(K,I) *          &
-                 VCI(L,I,K) + DZH(i,K+1) * DZHI(i,K) *                      &
-                        MDWN(K+1,I) * VCI(L,I,K+1))
+              DELC = DTS * (MBARKS(K,I) * VCI(L,I,1) - MDWN(K,I) *       &
+                 VCI(L,I,K)  + DZH(i,K+1) * DZHI(i,K) *                      &
+                        MDWN(K+1,I) * VCI(L,I,K+1))    !* NFRF(k) / VRF(k)
               DI(L,K)   = VCI(L,I,K) + (1.0 - CRANKP) * DELC
             ENDDO
           ENDDO
@@ -1110,7 +1429,7 @@ CONTAINS
             DO L = 1,NSPX                    
               DI(L,1) = VCI(L,I,1) + (FS(L,I) - (1.0 - CRANKP)              &
                         * (MBARKS(1,I) *                                    &
-                        (PBL(I) - ZF(i,1)) * VCI(L,I,1) -                   &
+                        (PBL(I) - ZF(i,1)) * VCI(L,I,1)  -                   &
                         MDWN(2,I) * VCI(L,I,2) * DZH(i,2))) * DZHI(i,1) * DTS
             ENDDO
           ELSE
@@ -1120,13 +1439,28 @@ CONTAINS
           ENDIF
           DO L = 1,NSPX                    
             DI(L,1) = DI(L,1) + (1.0 - CRANKP) * EDDYZ(I,1) * DZHI(i,1)     &
-                    * DZFI(i,1) * DTS * (VCI(L,I,2) - VCI(L,I,1))
+                    * DZFI(i,1) * DTS * (VCI(L,I,2) - VCI(L,I,1)) * NFRF(1,I) / VRF(1,I)
           ENDDO
+
+          !-- UTK Urban --addition of rooftop and wall fluxes
+          IF (ispxurb .AND. URBF(I) .GT. 0.0) THEN
+            DO L = 1,NSPX
+              DI(L,CNP) = DI(L,CNP) - FS_RF(L,I) * DZHI(i,CNP) * DTS
+            ENDDO
+
+            DO L = 1,NSPX
+              DO K = 1,CNP
+                DI(L,K) = DI(L,K) + (FS_WL(L,I) / HGTBDG(I)) * DTS
+              ENDDO
+            ENDDO  
+          ENDIF
+
           IF ( NOCONV(I) .EQ. 1 ) THEN
             CALL MATRIX (AI, BI, CI, DI, EI, UI, KL, NSPX)
           ELSE
             CALL TRI (CI, BI, EI, DI, UI, KL, NSPX)
           END IF
+
 !
 !-- COMPUTE NEW THETAV AND Q
           DO K = 1,KL
@@ -1135,8 +1469,8 @@ CONTAINS
             ENDDO
           ENDDO
 
-        ENDDO                   ! END I LOOP
-      ENDDO                     ! END SUB TIME LOOP
+        ENDDO                   ! END SUB TIME LOOP
+      ENDDO                     ! END I LOOP
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
 !
@@ -1147,7 +1481,7 @@ CONTAINS
           QCX(I,K)    = VCI(3,I,K)
           QIX(I,K)    = VCI(4,I,K)
 #if (WRF_CHEM == 1)
-          DO LL= 7, NSPX
+          DO LL = 7, NSPX
              CHEM(I,K,LL-NSP) = VCI(LL,I,K) 
           ENDDO
 #endif
@@ -1158,6 +1492,8 @@ CONTAINS
       DEALLOCATE (UI)  
       DEALLOCATE (FS)
       DEALLOCATE (VCI)
+      DEALLOCATE (FS_RF)
+      DEALLOCATE (FS_WL)
 
    END SUBROUTINE ACM
 !-----------------------------------------------------------------------
@@ -1168,6 +1504,7 @@ CONTAINS
                    TST, QST,  USTM, EDDYZM, DENSX,                 &
                    US,    VS,                                      &
                    UX,    VX,                                      &
+                   IMU, EXU, IMV, EXV, URBF, XTIME, ispxurb,       &    !DDY urban
                    ids,ide, jds,jde, kds,kde,                      &
                    ims,ime, jms,jme, kms,kme,                      &
                    its,ite, jts,jte, kts,kte)
@@ -1220,22 +1557,27 @@ CONTAINS
 !... Integer
       INTEGER,  INTENT(IN)      ::      ids,ide, jds,jde, kds,kde, &
                                         ims,ime, jms,jme, kms,kme, &
-                                        its,ite, jts,jte, kts,kte, JX
+                                        its,ite, jts,jte, kts,kte, &
+                                        JX, XTIME
       INTEGER,  DIMENSION( its:ite ), INTENT(IN)  :: NOCONV
       INTEGER,  DIMENSION( ims:ime ), INTENT(IN)  :: KLPBL
 
 !... Real
-      REAL , DIMENSION( ims:ime ),          INTENT(IN)  :: PBL, UST
-      REAL ,                                INTENT(IN)  :: DTPBL
-      REAL , DIMENSION( its:ite ),          INTENT(IN)  :: PSTAR,    &
-                                                           MOL, TST, &
-                                                           QST, USTM
-      REAL , DIMENSION( its:ite, kts:kte ), INTENT(IN)  :: DZHI, DZH, DZFI
-      REAL , DIMENSION( its:ite, 0:kte ),   INTENT(IN)  :: ZF
-      REAL , DIMENSION( its:ite, kts:kte ), INTENT(INOUT)  :: EDDYZM
-      REAL , DIMENSION( ims:ime, kms:kme ), INTENT(IN)  :: US,VS,    &
-                                                           DENSX
-      REAL , DIMENSION( its:ite, kts:kte ), INTENT(OUT) :: UX, VX
+      REAL, DIMENSION( ims:ime ),          INTENT(IN)    :: PBL, UST
+      REAL,                                INTENT(IN)    :: DTPBL
+      REAL, DIMENSION( its:ite ),          INTENT(IN)    :: PSTAR,    &
+                                                            MOL, TST, &
+                                                            QST, USTM
+      REAL, DIMENSION( its:ite, kts:kte ), INTENT(IN)    :: DZHI, DZH, DZFI
+      REAL, DIMENSION( its:ite, 0:kte ),   INTENT(IN)    :: ZF
+      REAL, DIMENSION( its:ite, kts:kte ), INTENT(INOUT) :: EDDYZM
+      REAL, DIMENSION( ims:ime, kms:kme ), INTENT(IN)    :: US, VS,   &
+                                                            DENSX
+      REAL, DIMENSION( its:ite, kts:kte ), INTENT(OUT)   :: UX, VX
+
+     !-- DDY urban
+      REAL, DIMENSION( its:ite, kts:kte, 1:2 ), INTENT(IN)    :: IMU, EXU, IMV, EXV
+
 !.......Local variables
 
 !... Parameters
@@ -1245,25 +1587,35 @@ CONTAINS
       REAL,    PARAMETER :: KARMAN = 0.4
 
 !... Integer
-      INTEGER :: ILX, KL, KLM, I, K, NSPX, NLP, NL, JJ, L
+      INTEGER :: ILX, KL, KLM, I, K, NSPX, NLP, NL, JJ, L, IDR
       INTEGER :: KCBLMX
       INTEGER, DIMENSION( its:ite ) :: KCBL
 
 !... Real
-      REAL                               :: MBMAX, HOVL, MEDDY, MBAR
-      REAL                               :: EKZ, RZ, FM, WSPD, DTS, DTRAT, F1
-      REAL, DIMENSION( its:ite )         :: PSTARI, FSACM, DTLIM
-      REAL, DIMENSION( kts:kte, its:ite) :: MBARKS, MDWN
-      REAL, DIMENSION( 1:NSP, its:ite )  :: FS
-      REAL, DIMENSION( kts:kte )         :: XPLUS, XMINUS
-      REAL  DELC
+      REAL                                :: MBMAX, HOVL, MEDDY, MBAR
+      REAL                                :: EKZ, RZ, FM, WSPD, DTS, DTRAT, F1
+      REAL, DIMENSION( its:ite )          :: PSTARI, FSACM, DTLIM
+      REAL, DIMENSION( kts:kte, its:ite ) :: MBARKS, MDWN
+      REAL, DIMENSION( 1:NSP, its:ite )   :: FS
+      REAL, DIMENSION( kts:kte )          :: XPLUS, XMINUS
+      REAL                                :: DELC
       REAL, DIMENSION( 1:NSP,its:ite,kts:kte  ) :: VCI
 
-      REAL, DIMENSION( kts:kte )               :: AI, BI, CI, EI !, Y
-      REAL, DIMENSION( 1:NSP,kts:kte )         :: DI, UI    
-!
-!--Start Exicutable ----
+      REAL, DIMENSION( kts:kte )                :: AI, BI, CI, EI !, Y
+      REAL, DIMENSION( 1:NSP,kts:kte )          :: DI, UI    
 
+     !-- DDY urban
+      REAL, DIMENSION( kts:kte )                :: BI2      
+      REAL, DIMENSION( 1:1,kts:kte )            :: DI2, UI2
+      REAL, DIMENSION( its:ite ), INTENT(IN)    :: URBF
+      INTEGER                                   :: NSP2  
+      logical, intent(in)                       :: ispxurb
+      REAL                                      :: CO
+
+!
+!--Start Executable ----
+
+      NSP2 = 1 !-- DDY
       ILX = ite
       KL  = kte
       KLM = kte - 1
@@ -1324,14 +1676,19 @@ CONTAINS
         ENDDO
       ENDDO
 
-      NSPX=2
+      NSPX = 2
 
       DO I = its,ILX
-        FM      = -USTM(I) * USTM(I)
         WSPD    = SQRT(US(I,1) * US(I,1) + VS(I,1) * VS(I,1)) + 1.E-9
-        FS(1,I) = FM * US(I,1) / WSPD
-        FS(2,I) = FM * VS(I,1) / WSPD
+        FM      = -USTM(I) * USTM(I) / WSPD
+        IF (URBF(I) .GT. 0.0 .and. ispxurb) THEN
+          FM = FM * (1 - URBF(I))
+        ENDIF
+!        FM = FM * DENSX(I,1) * PSTARI(I)
+        FS(1,I) = FM * US(I,1) !/ WSPD
+        FS(2,I) = FM * VS(I,1) !/ WSPD
       ENDDO
+
 !
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
       DO I = its,ILX      
@@ -1339,10 +1696,10 @@ CONTAINS
         NLP   = INT(DTPBL / DTLIM(I) + 1.0)
         DTS   = (DTPBL / NLP)
         DTRAT = DTS / DTPBL
+
         DO NL = 1,NLP           ! LOOP OVER SUB TIME LOOP              
 
 !-- COMPUTE ARRAY ELEMENTS THAT ARE INDEPENDANT OF SPECIES
-
           DO K = kts,KL
             AI(K) = 0.0
             BI(K) = 0.0
@@ -1433,28 +1790,65 @@ CONTAINS
             DI(L,1) = DI(L,1) + (1.0 - CRANKP) * EDDYZM(I,1) * DZHI(i,1)    &
                     * DZFI(i,1) * DTS * (VCI(L,I,2) - VCI(L,I,1))
           ENDDO
-          IF ( NOCONV(I) .EQ. 1 ) THEN
-            CALL MATRIX (AI, BI, CI, DI, EI, UI, KL, NSPX)
+
+          !-- DDY urban
+          IF (ispxurb .AND. URBF(I) .GT. 0.0) THEN
+          DO IDR = 1,2
+            DO L = 1,NSPX
+              DO K = 1,KL
+                CO = DZHI(I,K) * DTS
+                IF (L .EQ. 1) THEN
+                  BI2(K)   = BI(K) - IMU(I,K,IDR) * CO
+                  DI2(1,K) = DI(1,K) + EXU(I,K,IDR) * CO
+                ELSE
+                  BI2(K)   = BI(K) - IMV(I,K,IDR) * CO
+                  DI2(1,K) = DI(2,K) + EXV(I,K,IDR) * CO
+                ENDIF
+              ENDDO
+
+              IF ( NOCONV(I) .EQ. 1 ) THEN
+                CALL MATRIX (AI, BI2, CI, DI2, EI, UI2, KL, NSP2)
+              ELSE
+                CALL TRI (CI, BI2, EI, DI2, UI2, KL, NSP2)
+              ENDIF
+
+              !-- COMPUTE NEW U and V
+            if (IDR.eq.1) then
+              DO K = 1,KL                
+                VCI(L,I,K) = UI2(1,K)
+              ENDDO
+            else
+              DO K = 1,KL                
+                VCI(L,I,K) = 0.5 * (VCI(L,I,K) + UI2(1,K))
+              ENDDO
+            endif
+            ENDDO 
+          ENDDO   !end 2dir
           ELSE
-            CALL TRI (CI, BI, EI, DI, UI, KL, NSPX)
-          END IF
+            IF ( NOCONV(I) .EQ. 1 ) THEN
+              CALL MATRIX (AI, BI, CI, DI, EI, UI, KL, NSPX)
+            ELSE
+              CALL TRI (CI, BI, EI, DI, UI, KL, NSPX)
+            ENDIF
+
 !
 !-- COMPUTE NEW THETAV AND Q
-          DO K = 1,KL
-            DO L = 1,NSPX                    
-              VCI(L,I,K) = UI(L,K)
+            DO K = 1,KL
+              DO L = 1,NSPX                    
+                VCI(L,I,K) = UI(L,K)
+              ENDDO
             ENDDO
-          ENDDO
+          ENDIF !-- END DDY URBAN
 
-        ENDDO                   ! END I LOOP
-      ENDDO                     ! END SUB TIME LOOP
+        ENDDO                   ! END SUB TIME LOOP
+      ENDDO                     ! END I LOOP
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
 !
       DO K = kts,KL
         DO I = its,ILX
-          UX(I,K)     = VCI(1,I,K)
-          VX(I,K)     = VCI(2,I,K)
+          UX(I,K) = VCI(1,I,K)
+          VX(I,K) = VCI(2,I,K)
         ENDDO
       ENDDO
 
@@ -1511,22 +1905,22 @@ CONTAINS
       UII(1) = B(1)
       RUII(1) = 1./UII(1)
       DO I = 2, KL
-	      L(I,I) = 1.
-	      L(I,1) = A(I)/B(1)
+        L(I,I) = 1.
+        L(I,1) = A(I)/B(1)
         UIIP1(I-1)=E(I-1)
-	      IF(I.GE.3) THEN
-	        DO J = 2,I-1
-	          IF(I.EQ.J+1) THEN
-	            AIJ = C(I)
-	          ELSE
-	            AIJ = 0.
-	          ENDIF
-	          L(I,J) = (AIJ-L(I,J-1)*E(J-1))/      &
-                      (B(J)-L(J,J-1)*E(J-1))
-	        ENDDO
-	      ENDIF
+        IF(I.GE.3) THEN
+          DO J = 2,I-1
+            IF(I.EQ.J+1) THEN
+              AIJ = C(I)
+            ELSE
+              AIJ = 0.
+            ENDIF
+            L(I,J) = (AIJ-L(I,J-1)*E(J-1))/      &
+                     (B(J)-L(J,J-1)*E(J-1))
+          ENDDO
+        ENDIF
       ENDDO
-	  
+  
       DO I = 2,KL
         UII(I) = B(I)-L(I,I-1)*E(I-1)
         RUII(I) = 1./UII(I)
@@ -1536,11 +1930,11 @@ CONTAINS
       DO V= 1, NSP
         Y(V,1) = D(V,1)
         DO I=2,KL
-	        SUM = D(V,I)
-	        DO J=1,I-1
-	          SUM = SUM - L(I,J)*Y(V,J)
-	        ENDDO
-	        Y(V,I) = SUM
+          SUM = D(V,I)
+          DO J=1,I-1
+            SUM = SUM - L(I,J)*Y(V,J)
+          ENDDO
+          Y(V,I) = SUM
         ENDDO
       ENDDO
 
@@ -1560,7 +1954,7 @@ CONTAINS
 
 !-----------------------------------------------------------------------
 !-----------------------------------------------------------------------
-      SUBROUTINE TRI ( L, D, U, B, X,KL,NSP)
+      SUBROUTINE TRI(L, D, U, B, X, KL, NSP)
 !-----------------------------------------------------------------------
 !-----------------------------------------------------------------------
 
@@ -1611,9 +2005,9 @@ CONTAINS
       DO K = 2, KL
         GAM(K ) = BET * U( K-1 )
         BET = 1.0 / ( D( K ) - L( K ) * GAM( K ) )
-	      DO V = 1, NSP
-           X( V, K ) = BET * ( B( V,K ) - L( K ) * X( V,K-1 ) )
-	      ENDDO
+        DO V = 1, NSP
+          X( V, K ) = BET * ( B( V,K ) - L( K ) * X( V,K-1 ) )
+        ENDDO
       ENDDO
 
 ! Back-substitution:
@@ -1625,8 +2019,402 @@ CONTAINS
       ENDDO
      
   END SUBROUTINE TRI
+
+
+!-----------------------------------------------------------------------
+!-----------------------------------------------------------------------
+!-- DDY urban subroutines
+!-----------------------------------------------------------------------
+!-----------------------------------------------------------------------
+      SUBROUTINE ACMURB(COSZ, SWDOWN, CPD,                         &
+                        DZF, NLCAT, LANDUSEF, DENSX,               &
+                        THETAV, ZA,                                &
+                        US, VS, THETA, XTIME, DTPBL, restart,      &
+                        MIXLKZ, IMU, EXU, IMV, EXV,                &
+                        UST_WL,UST_RF,UST_ST,                      &
+                        ispxurb,lamp, HGTBDG, lamf,                &
+                        stdir1,stdir2,blkw1,blkw2,                 &
+                        ims,ime,kms,kme,jms,jme,its,ite,kts,kte,j)
+!-----------------------------------------------------------------------
+!-----------------------------------------------------------------------
+!--   The subroutine ACMURB is created to account for urban effects 
+!--   on wind speed and potential temperature in the ACM2 PBL scheme
+!--   
+!--   ACMURB subroutine will output, 
+!--   (1) MIXLKZ, veritcal mixing length profile, used in EDDYX
+!--   (2) IMU, EXU, IMV and EXV, the drag terms on momentum due to urban
+!--       used in ACMM
+!--   
+!--   ACMURB will also account for building surfaces and street temperature
+!--   which will be used in calculating the potential temperature drag terms
+!--   
+!--   REVISION HISTORY: 
+!--     DDY    07/2016   first version
+!--     UTK    05/2018   second version 
+!--
+!--   ARGUMENTS LIST:
+!--
+!--   INPUT VARIABLES:
+!--   COSZ      cosine of solar zenith angle
+!--   SWDOWN    downward shortwave radiation
+!--   ZF        height of each vertical layer
+!--   DZF       vertical layer thickness
+!--   NLCAT     number of landuse categories
+!--   LANDUSEF  landuse fraction
+!--   DENSX     density of air at vertical layer height
+!--   U, V, THETA         state variables wind speed and potential temperature
+!--   ims,ime,kms,kme,its,ite,kts,kte,j   dimensions of arrays
+!--
+!--
+!--   OUTPUT VARIABLES:
+!--   MIXLKZ    mixing length profile
+!--   IMU       implicit component of U-momentum drag
+!--   EXU       explicit component of U-momentum drag
+!--   IMV       implicit component of V-momentum drag
+!--   EXV       explicit component of V-momentum drag
+!--
+!--   URBAN PARAMETERS:
+!--   LAMF      frontal area density
+!--   LAMP      plan area density
+!--   HGTBDG    average building height
+!--   STANG     street angle
+!--   Z0RT      building roof roughness length
+!--   Z0ST      street roughness length
+!--   ALB       albedo of building surfaces
+!--   EMISS     emissivity of building surfaces
+!--   SURFDX    building surface thickness
+!--
 !-----------------------------------------------------------------------
 !-----------------------------------------------------------------------
 
+      IMPLICIT NONE
+
+      INTEGER, INTENT(IN) :: XTIME,ims,ime,kms,kme,jms,jme,its,  &
+                             ite,kts,kte,j
+      LOGICAL, INTENT(IN) :: restart
+      REAL, INTENT(IN)    :: DTPBL, CPD
+      REAL, DIMENSION( its:ite,kts:kte ), INTENT(IN)  :: THETAV, ZA 
+      REAL, DIMENSION( its:ite,kts:kte ), INTENT(OUT) :: MIXLKZ
+      REAL, DIMENSION( its:ite,kts:kte, 1:2 ), INTENT(OUT) ::         &
+                             IMU,EXU,IMV,EXV
+      REAL, DIMENSION( ims:ime,kms:kme ), INTENT(OUT) :: UST_WL
+      REAL, DIMENSION( ims:ime ), INTENT(OUT)         :: UST_RF, UST_ST
+      REAL, DIMENSION( ims:ime ), INTENT(IN)          :: SWDOWN, COSZ
+      REAL, DIMENSION( ims:ime,kms:kme ), INTENT(IN)  ::         &
+                             DZF,DENSX,US,VS,THETA
+      INTEGER, INTENT(IN) :: NLCAT
+      REAL, DIMENSION( ims:ime,1:NLCAT ), INTENT(IN)  :: LANDUSEF
+
+      
+      REAL, PARAMETER :: PI = 3.141592653
+      !-- urban morphological parameters
+      REAL, DIMENSION( ims:ime ), INTENT(IN) :: LAMF   ! frontal area density
+      REAL, DIMENSION( ims:ime ), INTENT(IN) :: LAMP   ! plan area density
+      REAL, DIMENSION( ims:ime ), INTENT(IN) :: HGTBDG ! average building height
+      INTEGER, DIMENSION( ims:ime ), INTENT(IN) :: STDIR1
+      INTEGER, DIMENSION( ims:ime ), INTENT(IN) :: STDIR2
+      REAL, DIMENSION( ims:ime ), INTENT(IN) :: BLKW1
+      REAL, DIMENSION( ims:ime ), INTENT(IN) :: BLKW2
+      REAL, DIMENSION( its:ite ) :: STANG  ! street angle (true bearing [deg])
+
+      !-- physical properties
+      REAL, PARAMETER :: ALB = 0.2, EMISS = 0.9, SURFDX = 0.25,     &
+                         CPCON = 850*2400*SURFDX, KDIFF = 6.7E-5
+      !-- constants
+      REAL, PARAMETER :: KARMAN = 0.4, SBCON = 5.67E-8
+      REAL, PARAMETER :: Z0RT   = 0.05        ! building roof roughness length in meters
+      REAL, PARAMETER :: Z0ST   = 0.3         ! street roughness length in meters
+      !-- constants
+      REAL, PARAMETER :: B1 = 9.4,  B2 = B1/2, CSTM = 7.4,  CSTH = 5.3 
+      REAL, PARAMETER :: CN = 0.5
+      INTEGER, PARAMETER :: KWAT = 17
+      real fwat,RBPW1,RBPW2, BB1, BB2
+
+      INTEGER :: NLEV, I, K, K2, ZCU1, ZCU2, NL, NSP, KL
+      REAL    :: DZBDG, TW, ACOEF, LCAN, ZW, ZC, LM, LUTOT, LMU
+      REAL    :: GAMDEN, GAMDIS, MORT1, WSP1, CF
+      REAL    :: FMHU1, FMHV1, FMV1, FMV2, FM
+      REAL    :: CO1, CO2, AA, C, BB, CO3, FMHU2, FMHV2, FM2
+      REAL    :: SHAZCU, SHAZ, ZR, SW
+      REAL    :: RADRT, RADST, BBDG, WSTT,W, RIN, WSPD
+      LOGICAL :: ISMIXL, ISDRAGM
+      REAL, DIMENSION( kts:kte ) :: VL, RADZ
+      REAL, DIMENSION( 0:kte )   :: Z1, Z2
+      REAL, DIMENSION(kts:kte+2) ::& ! D, L, U, DIF,               &
+                    SWF, LWF, HTF,TAIR
+      REAL, DIMENSION( kts:kte+2 ) :: F,Y
+      REAL, DIMENSION( its:ite )    :: URBF
+      INTEGER, DIMENSION( its:ite ) :: KSL
+      REAL :: RDZBDG, RZWMC, TANZ
+      REAL, SAVE ::  RZ0ST, RZ0RT
+      LOGICAL, SAVE :: FIRSTIME = .TRUE.
+      LOGICAL :: eof
+      logical,intent(in) :: ispxurb
+      INTEGER :: stat, c2, r
+      REAL, SAVE :: h(1:350,1:400), lf(1:350,1:400), lp(1:350,1:400), st(1:350,1:400)
+      REAL :: data(5)   ! *IMPORTANT NOTE*:- Change the array dim. accord. to dim. of data 
+!      REAL, SAVE :: H2, LF2, LP2, STANG2
+!      REAL, DIMENSION( ims:ime ) :: STANG2  ! street angle (true bearing [rad])
+      REAL :: STANGX
+      INTEGER :: IDIR,ihr
+! testing
+      real UST_ST_U,UST_ST_V,UST_RF_U,UST_RF_V,UST_WL_U,UST_WL_V
+      real time
+      LOGICAL :: LCZRUN = .TRUE.
+!
+!------------------Executables start here-----------------------
+!---------------------------------------------------------------
+
+
+      RZ0ST   = 1/Z0ST
+      RZ0RT   = 1/Z0RT
+
+      ISMIXL  = .FALSE.
+      ISDRAGM = .TRUE.
+
+      !-- initialization of urban momentum drag terms
+      Z2  = 0.0
+      IMU = 0.0
+      IMV = 0.0
+      EXU = 0.0
+      EXV = 0.0
+
+      DO I = its,ite
+        DO K = kts,kte
+          Z2(K)       = Z2(K-1) + DZF(I,K)
+          MIXLKZ(I,K) = KARMAN * Z2(K)
+        ENDDO
+      ENDDO
+
+      if (ispxurb) then
+        UST_WL =0.
+        DO I = its,ite
+
+        !-DDY urban
+
+          STANG(I)  = 0.0
+
+          !--DDY urban calculate urban fractions for USGS-landuse only (NOW)
+          URBF(I) = 0.0
+          LUTOT   = 0.0
+          DO NL = 1,  40   !NLCAT
+            LUTOT = LUTOT + LANDUSEF(I,NL)
+          ENDDO
+          IF (LUTOT .GT. 0.0) THEN
+!            URBF(I) = LANDUSEF(I,1)/LUTOT
+            URBF(I) = (LANDUSEF(I,24)+LANDUSEF(I,25)+LANDUSEF(I,26))/LUTOT  !-Only for NLCD40 here. 
+            FWAT = LANDUSEF(I,KWAT)
+          ENDIF
+          IF(URBF(I).LT.0.05.OR.FWAT.GT.0.5) URBF(I)=-1.0
+          IF( NLCAT.EQ.40) then 
+            LCZRUN = .FALSE.
+          ELSE IF ( NLCAT.EQ.51) then
+            LCZRUN = .TRUE.
+          ELSE
+            STOP ' Must be NLCD40 or NLCD 51'
+          Endif
+          !-- Estimation of the Urban canopy height level (Model-level)
+          IF (ISPXURB .AND. (URBF(I) .GT. 0.0)) THEN   !temp hack for testing
+            !-- convert urban morphology input parameters into building width and street width
+!            BBDG   = 60.  !(LAMP(I) / LAMF(I)) * HGTBDG(I)
+            WSTT   = 20.  !(1.0 / SQRT(LAMP(I)) - 1.0) * BBDG
+            IF(LCZRUN) then
+              BB1 = blkw1(i) - WSTT
+              BB2 = blkw2(i) - WSTT
+            else
+              BB1 = max(blkw1(i)*(1-fwat) - WSTT,10.)
+              BB2 = max(blkw2(i)*(1-fwat) - WSTT,10.)
+            endif
+            RBPW1   = 1.0 / (BB1 + WSTT)
+            RBPW2   = 1.0 / (BB2 + WSTT)
+!            STANG2(I) = STANG(I)*PI/180.
+            !-- calculate each level height                   
+!            if(BB1.gt.444..or.BB2.gt.444.) print *, ' BB1, BB2=', BB1,BB2
+            Z2(0) = 0.0
+            DO K = kts,kte
+              Z2(K) = Z2(K-1) + DZF(I,K)
+              IF (HGTBDG(I) .LE. Z2(K) .AND. HGTBDG(I) .GE. Z2(K-1)) THEN
+                KSL(I) = K
+              ENDIF
+            ENDDO
+            IF (ISMIXL) THEN  
+              !-- parameters required for mixing length change
+              ACOEF = 9.6 * LAMF(I)
+              LCAN  = HGTBDG(I) * ( 1.2 * LAMF(I) * (1 - EXP(-2 * ACOEF) ) &
+                      / 4 / ACOEF ** 3) ** 0.5
+              ZW    = 2 * HGTBDG(I)
+              ZC    = HGTBDG(I)
+              RZWMC = 1/(ZW - ZC)
+              DO K = kts,kte
+                !-- calculate mixing length
+                IF (Z2(K) .LT. ZC) THEN
+                  LM = LCAN
+                ELSEIF (Z2(K) .GT. ZW ) THEN
+                  LM = KARMAN * Z2(K)
+                ELSE
+                  LM = LCAN + (KARMAN * ZW - LCAN) * &
+                       (Z2(K) - ZC) * RZWMC
+                ENDIF
+                !-- calculate weighted mixing length with urban fraction
+                MIXLKZ(I,K) = KARMAN * Z2(K) + URBF(I) * &
+                              (LM  - KARMAN * Z2(K))
+              ENDDO
+            ENDIF
+
+            DO K = kts,KSL(I)
+              IF(ISDRAGM) THEN
+                GAMDEN = 0.
+                GAMDIS = 0.
+                IF (K .EQ. KSL(I)) THEN 
+                  !! get building distribution parameters
+                  !! at building top
+                  GAMDEN = 1.
+                  GAMDIS = (HGTBDG(I) - Z2(K-1)) / (Z2(K) - Z2(K-1))
+                ELSE
+                  !! lies between building blocks
+                  GAMDEN = 0.
+                  GAMDIS = 1.
+                ENDIF
+              ENDIF
+
+              IF (ISDRAGM) THEN
+                IF (GAMDIS .GT. 0.0) THEN 
+                  WSP1  = MAX(SQRT(US(I,K) * US(I,K) + VS(I,K) * VS(I,K) ),0.01) 
+
+                  AA    = THETAV(I,K+1) - THETAV(I,K)
+                  BB    = 2 * 9.81 / (THETAV(I,K+1) + THETAV(I,K))
+                  WSPD  = (US(I,K+1)-US(I,K))*(US(I,K+1)-US(I,K)) &
+                          +(VS(I,K+1)-VS(I,K))*(VS(I,K+1)-VS(I,K))
+                  WSPD  = MAX(WSPD,0.1)
+                  RIN   = ABS(ZA(I,K+1)-ZA(I,K)) * AA *BB / WSPD
+
+                  IF (RIN .GE. 0.0) THEN
+                    !  stable condition
+                    AA  = 1 + B2 * RIN
+                    AA  = AA * AA
+                    FM  = 1 / AA
+                    FM2 = FM
+                  ELSE
+                    ! unstable condition
+                    IF (K .EQ. kts) THEN
+                      AA = DZF(I,K) * 0.5 * RZ0ST
+                      BB = KARMAN / LOG(AA)
+                      CF = BB * BB * B1 * SQRT(AA)
+                      AA = B1 * RIN
+                      BB = CF * SQRT(-RIN)
+                      FM = 1 - AA / (1 + CSTM * BB)
+                    ENDIF
+                    IF (K .EQ. KSL(I)) THEN
+                      AA = DZF(I,K) * 0.5 * RZ0RT
+                      BB = KARMAN / LOG(AA)
+                      CF = BB * BB * B1 * SQRT(AA)
+                      AA = B1 * RIN
+                      BB = CF * SQRT(-RIN)
+                      FM2 = 1 - AA / (1 + CSTM * BB)
+                    ENDIF
+                  ENDIF
+                  FMHU1 = 0.0
+                  FMHV1 = 0.0
+                  FMHU2 = 0.0
+                  FMHV2 = 0.0
+                  IF (K .EQ. kts) THEN
+                    AA    = KARMAN / LOG(DZF(I,K) * 0.5 * RZ0ST)
+                    AA    = - AA * AA * WSP1
+                    FMHU1 = AA * FM 
+                    FMHV1 = FMHU1
+                  ENDIF
+                  IF (K .EQ. KSL(I)) THEN 
+                    AA    = KARMAN / LOG(DZF(I,K) * 0.5 * RZ0RT)
+                    AA    = - AA * AA * WSP1
+                    FMHU2 = AA * FM2 
+                    FMHV2 = FMHU2
+                  ENDIF
+
+!                  VL(K) = 1. - GAMDIS * BBDG * RBPW
+!                  AA    = URBF(I) / VL(K) * RBPW
+!                  IF (VL(K) .NE. 0.0) AA    = URBF(I) / VL(K) * RBPW  ! temp hack
+!                  CO1   = WSTT * AA
+                  CO1   = URBF(I) * (1. - LAMP(I))/(1-gamdis*LAMP(I))
+                  CO3   = URBF(I) * LAMP(I)
+                DO idir = 1,2  ! 2 street dir
+!                  CO2   = DZF(I,K) * GAMDIS * AA
+!                  CO2   = DZF(I,K) * GAMDIS * URBF(I) / ((WSTT+BBDG) - BBDG**2 * RBPW)
+!                  CO2   = 2. * DZF(I,K) * GAMDIS * URBF(I) * (1. - WSTT*RBPW1)*RBPW2
+!                  CO3   = BBDG * AA
+                IF(idir.eq.1) Then
+                   STANGX = float(stdir1(i))
+                   CO2   = DZF(I,K) * GAMDIS * URBF(I) * (1. - WSTT*RBPW2)*RBPW1/(1. - LAMP(I))
+                Else
+                   STANGX = float(stdir2(i))
+                   CO2   = DZF(I,K) * GAMDIS * URBF(I) * (1. - WSTT*RBPW1)*RBPW2/(1. - LAMP(I))
+                EndIf
+                STANGX = STANGx*PI/180.
+                  MORT1 = ABS(COS(STANGX) * US(I,K) - SIN(STANGX) * VS(I,K))
+                  FMV1  = - 0.4 * MORT1 
+                  FMV2  = - 0.4 * MORT1 
+                  IMU(I,K,idir) = FMV1 * COS(STANGX) * COS(STANGX) * CO2
+                  EXU(I,K,idir) = -FMV1 * SIN(STANGX) * COS(STANGX) * VS(I,K) * CO2
+                  EXV(I,K,idir) = -FMV2 * SIN(STANGX) * COS(STANGX) * US(I,K) * CO2
+                  IMV(I,K,idir) = FMV2 * SIN(STANGX) * SIN(STANGX) * CO2
+!                  if(HGTBDG(I).gt.100.0.and.k.eq.2) print *,'HGTBDG,STANGX,EXU,EXV=',HGTBDG(I),STANGX,EXU(I,K),EXV(I,K)
+                  IF (K .EQ. kts) THEN
+                    IMU(I,K,idir) = IMU(I,K,idir) + FMHU1 * CO1
+                    IMV(I,K,idir) = IMV(I,K,idir) + FMHV1 * CO1
+                    UST_ST_U = sqrt(abs(FMHU1* US(I,KTS)* CO1)) 
+                    UST_ST_V = sqrt(abs(FMHV1* VS(I,KTS)* CO1))
+                  ENDIF
+
+                  IF (K .EQ. KSL(I)) THEN
+                    IMU(I,K,idir) = IMU(I,K,idir) + FMHU2 * CO3
+                    IMV(I,K,idir) = IMV(I,K,idir) + FMHV2 * CO3
+                    UST_RF_U = sqrt(abs(FMHU2* US(I,KSL(i))* CO3))
+                    UST_RF_V = sqrt(abs(FMHV2* VS(I,KSL(i))* CO3))
+                  ENDIF
+
+                  IF (XTIME.EQ.1) THEN
+                    IMU(I,K,idir) = 0.
+                    EXU(I,K,idir) = 0.
+                    EXV(I,K,idir) = 0.
+                    IMV(I,K,idir) = 0.
+                  ENDIF
+                  
+                  UST_WL(i,k) = UST_WL(i,k) + 0.632*MORT1 * sqrt(CO2)  !  sqrt(k Uort**2 fwl))
+                ENDDO ! 2 street dir
+
+                ENDIF !-- end if gamdis
+
+              ENDIF !-- end if drag flags
+            ENDDO !-- end K loop
+
+!             DO K = kts,KSL(I)
+!               UST_WL_U=0.
+!               UST_WL_v=0.
+!               DO idir = 1,2
+!                 IF (K .EQ. kts) THEN
+!                    UST_WL_U=UST_WL_U+abs((IMU(I,K,idir)-FMHU1 * CO1)*US(I,k))+abs(EXU(I,K,idir))
+!                    UST_WL_V=UST_WL_V+abs((IMV(I,K,idir)-FMHV1 * CO1)*VS(I,k))+abs(EXV(I,K,idir))
+!                 else
+!                 UST_WL_U=UST_WL_U+abs(IMU(I,K,idir)*US(I,k))+abs(EXU(I,K,idir))
+!                 UST_WL_V=UST_WL_V+abs(IMV(I,K,idir)*VS(I,k))+abs(EXV(I,K,idir))
+!                 endif
+!               ENDDO
+!               UST_WL(i,k) = sqrt(UST_WL_U + UST_WL_V)
+!             ENDDO
+!            USTOU_WL(I) = sqrt(UST_WL_U**2 + UST_WL_V**2)/HGTBDG(I)
+            UST_RF(I)   = sqrt(UST_RF_U**2 + UST_RF_V**2)
+            UST_ST(I)   = sqrt(UST_ST_U**2 + UST_ST_V**2)
+            time = xtime*dtpbl  !s
+            ihr = mod(int(time),3600)
+!            if(HGTBDG(I).gt.120.0.and.ihr.eq.0) then
+!             print *,'HGTBDG,time,ksl=',HGTBDG(I),time,ksl(i)
+!             print *,'UST_WL_U,UST_WL_V,UST_WL=',UST_WL_U,UST_WL_V,UST_WL(I,2)
+!             print *,'UST_ST_U,UST_ST_V=',UST_ST_U,UST_ST_V,US(I,KTS),VS(I,KTS)
+!             print *,'UST_RF_U,UST_RF_V,UST_RF=',UST_RF_U,UST_RF_V,UST_RF(I)
+!            ENDIF
+          ENDIF !-- end if urban fraction .gt. 0.0
+        ENDDO !-- end I loop
+      endif
+
+      END SUBROUTINE ACMURB
+
 END MODULE module_bl_acm
-                        

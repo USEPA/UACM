@@ -483,6 +483,7 @@ BENCH_START(rad_driver_tim)
      &         ,EFSS=grid%EFSS,QS_CU=grid%QS_CU &
      &         ,feedback_is_ready=feedback_is_ready   &
 #if ( WRF_CMAQ == 1)
+     &         ,inner_domain=(grid%id==grid%max_dom)  &
      &         ,mass_ws_i=grid%mass_ws_i              &
      &         ,mass_ws_j=grid%mass_ws_j              &
      &         ,mass_ws_k=grid%mass_ws_k              &
@@ -605,7 +606,18 @@ BENCH_START(surf_driver_tim)
      &        ,DZ8W=dz8w          ,DZS=grid%dzs            ,FLHC=grid%flhc          &
      &        ,FM=grid%fm         ,FHH=grid%fh                                      &
      &        ,FLQC=grid%flqc          ,GLW=grid%glw            ,GRDFLX=grid%grdflx      &
-     &        ,GSW=grid%gsw    ,SWDOWN=grid%swdown        ,GZ1OZ0=gz1oz0      ,HFX=grid%hfx              &
+     &        ,GSW=grid%gsw            ,SWDOWN=grid%swdown      ,GZ1OZ0=gz1oz0           &
+     &        ,HFX=grid%hfx            ,HFX_RF=grid%hfx_rf      ,HFX_WL=grid%hfx_wl                                &      ! PX-LSM  ! UTK-Urban
+     &        ,ANTHFX1=grid%anthfx1    ,ANTHFX_RF=grid%anthfx_rf                                                   &      ! PX-LSM  ! UTK-Urban
+     &        ,QFX_RF=grid%qfx_rf      ,LH_RF=grid%lh_rf                                                           &      ! PX-LSM  ! UTK-Urban
+     &        ,TG_RF=grid%tg_rf        ,T2_RF=grid%t2_rf         ,TG_WL=grid%tg_wl   ,T2_WL=grid%t2_wl             &      ! PX-LSM  ! UTK-Urban
+     &        ,T2_GND=grid%t2_gnd                                                                                  &      ! PX-LSM  ! UTK-Urban
+     &        ,RADWL=grid%radwl        ,RADWL_FNL=grid%radwl_fnl ,RADST=grid%radst   ,RADST_FNL=grid%radst_fnl     &      ! PX-LSM  ! UTK-Urban
+     &        ,GSW_URB=grid%gsw_urb    ,GSW_WL=grid%gsw_wl                                                         &      ! PX-LSM  ! UTK-Urban
+     &        ,RADNET=grid%RADNET    ,RADNET_URB=grid%RADNET_URB,RADNET_RF=grid%RADNET_RF,RADNET_WL=grid%RADNET_WL &      ! PX-LSM  ! UTK-Urban
+     &        ,LWDN_URB=grid%LWDN_URB  ,LWDN_RF=grid%LWDN_RF     ,LWDN_WL=grid%LWDN_WL                             &      ! PX-LSM  ! UTK-Urban
+     &        ,LWUP_URB=grid%LWUP_URB  ,LWUP_RF=grid%LWUP_RF     ,LWUP_WL=grid%LWUP_WL                             &      ! PX-LSM  ! UTK-Urban
+     &        ,GAB_WL=grid%gab_wl      ,GAB_RF=grid%gab_rf       ,WSP_CAN=grid%wsp_can                             &      ! PX-LSM  ! UTK-Urban
      &        ,HT=grid%ht              ,IFSNOW=config_flags%ifsnow      ,ISFFLX=config_flags%isfflx      &
      &        ,FRACTIONAL_SEAICE=config_flags%fractional_seaice           &
      &        ,SEAICE_ALBEDO_OPT=config_flags%seaice_albedo_opt           &
@@ -796,7 +808,7 @@ BENCH_START(surf_driver_tim)
      &        ,RN_URB2D=grid%rn_urb2d     , TS_URB2D=grid%ts_urb2d        & !H urban
      &        ,FRC_URB2D=grid%frc_urb2d                                   & !H urban
      &        ,UTYPE_URB2D=grid%utype_urb2d                               & !H urban
-     &        ,SWDDIR=grid%swddir,SWDDIF=grid%swddif                      & !multi-layer urban _gl
+!     &        ,SWDDIR=grid%swddir,SWDDIF=grid%swddif                      & !multi-layer urban _gl
          ! Optional urban for BEP scheme
      &        ,SF_URBAN_PHYSICS=config_flags%sf_urban_physics             &
      &        ,num_urban_ndm = config_flags%num_urban_ndm                 & !multi-layer urban
@@ -850,7 +862,8 @@ BENCH_START(surf_driver_tim)
      &        ,MH_URB2D=grid%mh_urb2d,STDH_URB2D=grid%stdh_urb2d          & !SLUCM
      &        ,LF_URB2D=grid%lf_urb2d                                           & 
      &        ,lf_urb2d_s=grid%lf_urb2d_s, z0_urb2d=grid%z0_urb2d               &
-     &        ,GMT=grid%gmt,XLAT=grid%xlat,XLONG=grid%xlong,JULDAY=grid%julday  &
+     &        ,GMT=grid%gmt,XLAT=grid%xlat,XLONG=grid%xlong                     &
+     &        ,SINA=grid%sina,COSA=grid%cosa ,JULDAY=grid%julday                &
      &        ,distributed_ahe_opt=grid%distributed_ahe_opt, ahe=grid%ahe       & !For anthropogenic heat
      &        ,A_U_BEP=grid%a_u_bep,A_V_BEP=grid%a_v_bep,A_T_BEP=grid%a_t_bep   &
      &        ,A_Q_BEP=grid%a_q_bep                                             &
@@ -872,6 +885,11 @@ BENCH_START(surf_driver_tim)
      &        ,ANAL_INTERVAL=config_flags%auxinput9_interval_s+config_flags%auxinput9_interval_m*60  &   ! P-X LSM
      &        ,PXLSM_SMOIS_INIT=config_flags%pxlsm_smois_init             &   ! P-X LSM
      &        ,PXLSM_SOIL_NUDGE=config_flags%pxlsm_soil_nudge             &   ! P-X LSM
+     &        ,SWDDIR=grid%swddir, SWDDIF=grid%swddif                     &   ! P-X LSM  ! UTK-Urban 
+     &        ,BUILD_AREA_FRACTION=grid%build_area_fraction               &   ! P-X LSM  ! UTK-Urban 
+     &        ,BUILD_HEIGHT=grid%build_height, LAMF=grid%lamf             &   ! P-X LSM  ! UTK-Urban
+     &        ,STDIR1=grid%stdir1, STDIR2=grid%stdir2                     &   ! P-X LSM  ! UTK-Urban
+     &        ,BLKW1=grid%blkw1, BLKW2=grid%blkw2                         &   ! P-X LSM  ! UTK-Urban
            ! SSiB LSM variables (fds 06/2010)
      &        ,alswvisdir=grid%alswvisdir, alswvisdif=grid%alswvisdif    & !ssib
      &        ,alswnirdir=grid%alswnirdir, alswnirdif=grid%alswnirdif    & !ssib
@@ -914,6 +932,7 @@ BENCH_START(surf_driver_tim)
      &        ,sn_ndg_old=grid%sn_ndg_old                  &
      &        ,sn_ndg_new=grid%sn_ndg_new                  &
      &        ,pxlsm_modis_veg=config_flags%pxlsm_modis_veg                   &
+     &        ,ifuacm=config_flags%ifuacm                                     &
      &        ,LAI_PX=grid%lai_px                                             &
      &        ,WWLT_PX=grid%wwlt_px, WFC_PX=grid%wfc_px                       &
      &        ,WSAT_PX=grid%wsat_px, CLAY_PX=grid%clay_px                     &
@@ -1315,6 +1334,16 @@ BENCH_START(pbl_driver_tim)
      &        ,NUM_VERT_MIX=grid%num_vert_mix                             &
 #endif
      &        ,QNORM=grid%QNORM, fasdas=config_flags%fasdas               & !fasdas
+! DDY ACM urban
+     &        ,NLCAT=grid%num_land_cat, LANDUSEF=grid%landusef            &
+     &        ,COSZ=grid%COSZEN, SWDOWN=grid%SWDOWN                       &
+     &        ,ifuacm=config_flags%ifuacm                                 &
+     &        ,HFX_RF=grid%hfx_rf, HFX_WL=grid%hfx_wl, QFX_RF=grid%qfx_rf &  ! ACM2-PBL    ! UTK-Urban
+     &        ,BUILD_AREA_FRACTION=grid%build_area_fraction               &  ! ACM2  ! UTK-Urban 
+     &        ,BUILD_HEIGHT=grid%build_height, LAMF=grid%lamf             &  ! ACM2  ! UTK-Urban
+     &        ,STDIR1=grid%stdir1, STDIR2=grid%stdir2                     &   ! P-X LSM  ! UTK-Urban
+     &        ,BLKW1=grid%blkw1, BLKW2=grid%blkw2                         &   ! P-X LSM  ! UTK-Urban
+     &        ,UST_WL=grid%UST_WL,UST_RF=grid%UST_RF, UST_ST=grid%UST_ST  &  ! ACM2  ! UTK-Urban 
      &        )
 
 #if (WRF_CHEM == 1)

@@ -139,6 +139,9 @@ SUBROUTINE solve_em ( grid , config_flags  &
                                         ! 3 = run WRF-CMAQ coupled model w   producing MCIP like GRID and MET files
 
    logical       :: cmaq_step           ! CMAQ step number
+   integer, save :: wrf_time_step       ! for WRF-CMAQ to run in the most inner domain in the WRF nested domain setting
+   integer, save :: wrf_cmaq_model_tstep! for WRF-CMAQ to run in the most inner domain in the WRF nested domain setting
+   real, save    :: d1_size             ! for WRF-CMAQ to run in the most inner domain in the WRF nested domain setting
 
    logical, save :: firstime = .true.,   &  ! logical variable indicating first time
                     feedback_is_ready,   &  ! logical variable indicating feedback process can proceed
@@ -4914,90 +4917,101 @@ BENCH_END(bc_2d_tim)
 #include "bench_solve_em_end.h"
 
 #if (WRF_CMAQ == 1)
-   if (firstime) then
-      CALL nl_get_wrf_cmaq_option ( 1, wrf_cmaq_option )
-      CALL nl_get_wrf_cmaq_freq ( 1, wrf_cmaq_freq )
-      CALL nl_get_direct_sw_feedback ( .false., direct_sw_feedback )
-      CALL nl_get_met_file_tstep ( 1, met_file_tstep )
+   if (grid%id == 1) then
+      d1_size = grid%dx
+   end if
 
-      cmaq_wrf_feedback = direct_sw_feedback
+   if (grid%id == grid%max_dom) then
+      if (firstime) then
+         CALL nl_get_wrf_cmaq_option ( 1, wrf_cmaq_option )
+         CALL nl_get_wrf_cmaq_freq ( 1, wrf_cmaq_freq )
+         CALL nl_get_direct_sw_feedback ( .false., direct_sw_feedback )
+         CALL nl_get_met_file_tstep ( 1, met_file_tstep )
+
+         cmaq_wrf_feedback = direct_sw_feedback
+
+         wrf_time_step = grid%time_step / int(d1_size / grid%dx)
+         wrf_cmaq_model_tstep = wrf_time_step * wrf_cmaq_freq
+
+         if (wrf_cmaq_option .gt. 0) then
+            cmaq_nstep = ((grid%run_days * 24 + grid%run_hours) * 3600 + grid%run_minutes * 60 + grid%run_seconds) / &
+                          (wrf_time_step * WRF_CMAQ_FREQ)
+
+            wrf_end_step = cmaq_nstep * WRF_CMAQ_FREQ - 1
+         end if
+      end if
 
       if (wrf_cmaq_option .gt. 0) then
-         cmaq_nstep = ((grid%run_days * 24 + grid%run_hours) * 3600 + grid%run_minutes * 60 + grid%run_seconds) / &
-                       (grid%time_step * WRF_CMAQ_FREQ)
+         COUNTER = COUNTER + 1
 
-         wrf_end_step = cmaq_nstep * WRF_CMAQ_FREQ - 1
-      end if
-   end if
-
-   if (wrf_cmaq_option .gt. 0) then
-      COUNTER = COUNTER + 1
-
-      if ( .not. cmaq_wrf_feedback .and. firstime) then
-         grid%prev_rainnc = 0.0
-         grid%prev_rainc  = 0.0
-      end if
-
-      CMAQ_STEP = (mod(COUNTER, WRF_CMAQ_FREQ) .EQ. 0)
-
-      if (CMAQ_STEP) then
-         CALL aqprep (grid, config_flags, grid%t_phy, p_phy,       &
-                      grid%rho, grid%z_at_w, dz8w, p8w, t8w,       &
-                      model_config_rec%num_land_cat, 'V4.1.1',     &
-                      wrf_cmaq_option, wrf_cmaq_freq,              &
-                      ids, ide, jds, jde, kds, kde,                &
-                      ims, ime, jms, jme, kms, kme,                &
-                      ips, ipe, jps, jpe, kps, kpe,                &
-                      moist(:,:,:,p_qv),                           &  !  optional
-                      moist(:,:,:,p_qc),                           &  !  optional
-                      moist(:,:,:,p_qr),                           &  !  optional
-                      moist(:,:,:,p_qi),                           &  !  optional
-                      moist(:,:,:,p_qs),                           &  !  optional
-                      moist(:,:,:,p_qg)                            &  !  optional
-                     )
-         grid%prev_rainnc = grid%rainnc
-         grid%prev_rainc  = grid%rainc
-      end if
-
-      if ((counter >= 1) .and. (CMAQ_STEP) .and. (wrf_cmaq_option .gt. 1)) then
-
-         CALL CMAQ_DRIVER (cmaq_sdate, cmaq_stime, grid%time_step*WRF_CMAQ_FREQ,  &
-                           twoway_jdate, twoway_jtime, .false.)
-
-         if (direct_sw_feedback) then
-            CALL FEEDBACK_READ (grid, twoway_jdate, twoway_jtime)
-            feedback_is_ready = .true.
+         if ( .not. cmaq_wrf_feedback .and. firstime) then
+            grid%prev_rainnc = 0.0
+            grid%prev_rainc  = 0.0
          end if
 
-      end if
+         CMAQ_STEP = (mod(COUNTER, WRF_CMAQ_FREQ) .EQ. 0)
+
+         if (CMAQ_STEP) then
+            CALL aqprep (grid, config_flags, grid%t_phy, p_phy,       &
+                         grid%rho, grid%z_at_w, dz8w, p8w, t8w,       &
+                         model_config_rec%num_land_cat, 'V4.1.1',     &
+                         wrf_cmaq_option, wrf_cmaq_freq,              &
+                         wrf_cmaq_model_tstep,                        &
+                         ids, ide, jds, jde, kds, kde,                &
+                         ims, ime, jms, jme, kms, kme,                &
+                         ips, ipe, jps, jpe, kps, kpe,                &
+                         moist(:,:,:,p_qv),                           &  !  optional
+                         moist(:,:,:,p_qc),                           &  !  optional
+                         moist(:,:,:,p_qr),                           &  !  optional
+                         moist(:,:,:,p_qi),                           &  !  optional
+                         moist(:,:,:,p_qs),                           &  !  optional
+                         moist(:,:,:,p_qg)                            &  !  optional
+                        )
+            grid%prev_rainnc = grid%rainnc
+            grid%prev_rainc  = grid%rainc
+         end if
+
+         if ((counter >= 1) .and. (CMAQ_STEP) .and. (wrf_cmaq_option .gt. 1)) then
+
+            CALL CMAQ_DRIVER (cmaq_sdate, cmaq_stime, wrf_time_step*WRF_CMAQ_FREQ,  &
+                              twoway_jdate, twoway_jtime, .false.)
+
+            if (direct_sw_feedback) then
+               CALL FEEDBACK_READ (grid, twoway_jdate, twoway_jtime)
+               feedback_is_ready = .true.
+            end if
+
+         end if
 
 ! call aqprep and cmaq one last time before the entire twoway model ends
-      if (wrf_end_step == counter) then
-         CALL aqprep (grid, config_flags, grid%t_phy, p_phy,       &
-                      grid%rho, grid%z_at_w, dz8w, p8w, t8w,       &
-                      model_config_rec%num_land_cat, 'V4.1.1',     &
-                      wrf_cmaq_option, wrf_cmaq_freq,              &
-                      ids, ide, jds, jde, kds, kde,                &
-                      ims, ime, jms, jme, kms, kme,                &
-                      ips, ipe, jps, jpe, kps, kpe,                &
-                      moist(:,:,:,p_qv),                           &  !  optional
-                      moist(:,:,:,p_qc),                           &  !  optional
-                      moist(:,:,:,p_qr),                           &  !  optional
-                      moist(:,:,:,p_qi),                           &  !  optional
-                      moist(:,:,:,p_qs),                           &  !  optional
-                      moist(:,:,:,p_qg)                            &  !  optional
-                     )
+         if (wrf_end_step == counter) then
+            CALL aqprep (grid, config_flags, grid%t_phy, p_phy,       &
+                         grid%rho, grid%z_at_w, dz8w, p8w, t8w,       &
+                         model_config_rec%num_land_cat, 'V4.1.1',     &
+                         wrf_cmaq_option, wrf_cmaq_freq,              &
+                         wrf_cmaq_model_tstep,                        &
+                         ids, ide, jds, jde, kds, kde,                &
+                         ims, ime, jms, jme, kms, kme,                &
+                         ips, ipe, jps, jpe, kps, kpe,                &
+                         moist(:,:,:,p_qv),                           &  !  optional
+                         moist(:,:,:,p_qc),                           &  !  optional
+                         moist(:,:,:,p_qr),                           &  !  optional
+                         moist(:,:,:,p_qi),                           &  !  optional
+                         moist(:,:,:,p_qs),                           &  !  optional
+                         moist(:,:,:,p_qg)                            &  !  optional
+                        )
 
-         if (wrf_cmaq_option .gt. 1) then
+            if (wrf_cmaq_option .gt. 1) then
 
-            CALL CMAQ_DRIVER (cmaq_sdate, cmaq_stime, grid%time_step*WRF_CMAQ_FREQ, &
-                              twoway_jdate, twoway_jtime, .true.)
+               CALL CMAQ_DRIVER (cmaq_sdate, cmaq_stime, wrf_time_step*WRF_CMAQ_FREQ,  &
+                                 twoway_jdate, twoway_jtime, .true.)
+            end if
+
          end if
 
+         firstime = .false.
       end if
-
    end if
-   firstime = .false.
 #endif
 
    RETURN

@@ -3523,7 +3523,7 @@ CALL lsm_mosaic_init(IVGTYP,config_flags%ISWATER,config_flags%ISURBAN,config_fla
           if(config_flags%num_land_cat .ne. 20 .and. config_flags%num_land_cat .ne. 21 .and. & ! MODIS
              config_flags%num_land_cat .ne. 24 .and. config_flags%num_land_cat .ne. 28 .and. & ! USGS
              config_flags%num_land_cat .ne. 40 .and. config_flags%num_land_cat .ne. 50 .and. & ! NLCD
-             config_flags%num_land_cat .ne. 61 )                                             & ! MODIS W/LCZ 
+             config_flags%num_land_cat .ne. 61 .and. config_flags%num_land_cat .ne. 51 )                                             & ! MODIS W/LCZ 
           CALL wrf_error_fatal ( 'module_physics_init: PX LSM option requires USGS, MODIS, or NLCD' )
           CALL LSMINIT(VEGFRA,SNOW,SNOWC,SNOWH,CANWAT,SMSTAV,  &
                      SMSTOT, SFCRUNOFF,UDRUNOFF,ACSNOW,        &

@@ -29,7 +29,7 @@ deflt :
 
 include ./configure.wrf
 
-EM_MODULE_DIR = -I../dyn_em
+EM_MODULE_DIR = -I../dyn_em -I../cmaq
 EM_MODULES =  $(EM_MODULE_DIR)
 
 DA_WRFVAR_MODULES = $(INCLUDE_MODULES)
