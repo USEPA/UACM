@@ -16,7 +16,6 @@
 *.a
 configure.wrf*
 *.backup
-*.f90
 
 # Out-of-source build locations
 _build*
