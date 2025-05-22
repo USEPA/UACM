@@ -1,1 +1,4 @@
-Empty file
+To compile UACM-WRF-CMAQ 
+setenv WRF_CMAQ 1
+configure
+compile em_real
