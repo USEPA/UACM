@@ -1,0 +1,6 @@
+Building data from WUDAPT LCZ.  
+For this option the 11 LCZ categories are added to NLCD40 to make NLCD51
+To do this you need to run geogrid twice for NLCD40 and MODIS_lcz61
+Then use R script (nlcd_lcz.R) written by Rob Gilliam to merge the two LU datasets into NLCD51.
+The script (update.lcz.csh) can do all 3 operations
+Note that the LCZ data in NLCD51 (cats 41-51) are independent of the NLCD40 data.
