@@ -1,0 +1,7 @@
+These are possibly useful processors for adding building and street related parameters to wrfinput for running UACM
+
+The python processor: addBldHgt_FAI.py reads netcdf file containing average frontal area index, building height, and plan aera density grid cell and then adds these parameters to a wrfinput file
+
+The python processor: addstreets.py reads netcdf file containing two street directions and two block widths and then adds them to wrfinput
+
+The fortran program: streetproc.f90 reads a CSV file containing the direction and length of each street in each grid cell, and then finds the two most prevalent street directions and writes out the two directions and associated block widths.
