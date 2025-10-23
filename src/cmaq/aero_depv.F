@@ -782,7 +782,7 @@ C now do 3rd moment for the deposition of mass
               ENDDO
 ! -- Roof
               Re = MET_DATA%ust_rf(c,r)*krough/nu
-              Eb = 1/(sqrt(SC2)*Re**0.05)
+              Eb = 1/(sqrt(SC3)*Re**0.05)
               Stoke = Vghat3 * MET_DATA%ust_rf(c,r)**2 / ( GRAV * NU )
               Eim = Stoke**2/(1.+Stoke**2)   !10.**(-3/Stoke)
 !              Eit = 0.05*Stoke**0.75             
