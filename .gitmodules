@@ -1,12 +1,10 @@
-[submodule "phys/noahmp"]
-	path = phys/noahmp
-	url = https://github.com/NCAR/noahmp
 [submodule ".ci/hpc-workflows"]
 	path = .ci/hpc-workflows
 	url = https://github.com/islas/hpc-workflows
-[submodule "phys/MYNN-EDMF"]
-	path = phys/MYNN-EDMF
+
+[submodule "src/phys/noahmp"]
+	path = src/phys/noahmp
+	url = https://github.com/NCAR/noahmp
+[submodule "src/phys/MYNN-EDMF"]
+	path = src/phys/MYNN-EDMF
 	url = https://github.com/NCAR/MYNN-EDMF
-[submodule "phys/physics_mmm"]
-	path = phys/physics_mmm
-	url = https://github.com/NCAR/MMM-physics.git
