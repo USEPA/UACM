@@ -103,6 +103,7 @@ C Local variables:
 !--Urban
       LOGICAL        :: ispxurb = .TRUE.
       REAL UST_CAN, HGTBDG, USTT, USTK, DZH, MIXWL
+      REAL  :: USTK2 (NLAYS)
       INTEGER LAYRF  
       REAL, PARAMETER :: WSTT   = 20.0   !m
 C-----------------------------------------------------------------------
@@ -120,18 +121,19 @@ C-----------------------------------------------------------------------
           DZH = Met_Data%ZF( C,R,L ) - Met_Data%ZF( C,R,L-1 )  
           IF(Met_Data%ZF( C,R,L-1 ).LT.HGTBDG) THEN  
              UST_CAN = UST_CAN + MET_DATA%ust_wl(c,r,l)**2 * DZH
+             USTK2(l) = UST_CAN/Met_Data%ZF( C,R,L )
              LAYRF = L   
           ENDIF
         ENDDO
         UST_CAN = sqrt(UST_CAN /  HGTBDG)    !Met_Data%ZF( C,R,LAYRF ) Fix on July 9, 2024
-        USTT = Met_Data%USTAR( C,R ) + UST_CAN + MET_DATA%ust_rf(c,r)
+        USTT = sqrt(Met_Data%USTAR( C,R )**2 + UST_CAN**2 + MET_DATA%ust_rf(c,r)**2)
       ENDIF          
 
       DO 233 L = 1, NLAYS-1
 
          IF(ispxurb) THEN         
            IF(Met_Data%ZF( C,R,L ).LT.HGTBDG) THEN
-              USTK =  MET_DATA%ust_wl(c,r,l) + Met_Data%USTAR( C,R )
+              USTK =  sqrt(USTK2(L) + Met_Data%USTAR( C,R )**2)
            ELSE 
               USTK = USTT
            ENDIF
@@ -217,7 +219,7 @@ C-- Adjustment to vert diff in Moist air from HIRPBL
             FH = 0.0012 + 1.0 / FH  ! pleim5
             IF(L.EQ.LAYRF) Then       
               EDDV = KZM + SQRT( WS2 ) * FH * SQL 
-     &             + (MET_DATA%ust_wl(c,r,l)+MET_DATA%ust_rf(c,r))*MIXWL
+     &             + sqrt(MET_DATA%ust_wl(c,r,l)**2+MET_DATA%ust_rf(c,r)**2)*MIXWL
             ELSE
                EDDV = KZM + SQRT( WS2 ) * FH * SQL 
      &             + MET_DATA%ust_wl(c,r,l)*MIXWL
@@ -225,7 +227,7 @@ C-- Adjustment to vert diff in Moist air from HIRPBL
          ELSE
             IF(L.EQ.LAYRF) Then
               EDDV = KZM + SQRT( WS2 * ( 1.0 - 25.0 * RIB ) ) * SQL
-     &             + (MET_DATA%ust_wl(c,r,l)+MET_DATA%ust_rf(c,r))*MIXWL
+     &             + sqrt(MET_DATA%ust_wl(c,r,l)**2+MET_DATA%ust_rf(c,r)**2)*MIXWL
             ELSE
               EDDV = KZM + SQRT( WS2 * ( 1.0 - 25.0 * RIB ) ) * SQL
      &             + MET_DATA%ust_wl(c,r,l)*MIXWL
