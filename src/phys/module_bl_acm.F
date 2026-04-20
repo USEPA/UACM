@@ -472,6 +472,7 @@ CONTAINS
         DO I = its,ite
           ZF(I,0) = 0.0
         ENDDO
+        KSL = 0
 
         DO K = kts,kte
           DO I = its,ite
@@ -528,9 +529,8 @@ CONTAINS
           TFXT = -(TMPFX+TMPFX_RF(I) + TMPFX_WL(I))
           QFXT = -(QFX(I)+QFX_RF(I)) / (DENSX(I,1))
           TSTV(I) = TFXT*TMPVTCON + THV1*EP1*QFXT
-          USTT(I) = UST_CAN(I) + UST(I) + UST_RF(I)
-!          if (USTT(I).GT.100.) print *, 'UST(I),UST_CAN(I),UST_RF(I),HGTBDG(I),KSL(I)',  &
-!                                 UST(I),UST_CAN(I),UST_RF(I),HGTBDG(I),KSL(I)  
+          USTT(I) = sqrt(UST_CAN(I)**2 + UST(I)**2 + UST_RF(I)**2)
+
           TSTV(I) = (TFXT*TMPVTCON + THV1*EP1*QFXT)/USTT(I)
         ELSE
           TSTV(I) = TST(I)*TMPVTCON + THV1*EP1*QST(I)
@@ -897,10 +897,11 @@ CONTAINS
       INTEGER  :: ILX, KL, KLM, K, I
 
 !... Real
-      REAL     :: ZOVL, PHIH, WT, ZSOL, ZFUNC, DZF, SS, GOTH, EDYZ
+      REAL     :: ZOVL, PHIH, WT, ZSOL, ZFUNC, DZF, SS, GOTH, EDYZ, DZZ
       REAL     :: RI, QMEAN, TMEAN, XLV, ALPH, CHI, ZK, SQL, DENSF, KZO
       REAL     :: FH, FM
-      REAL     :: WM, EDYZM, PHIM, USTK, MIXWL
+      REAL     :: WM, EDYZM, PHIM, MIXWL, USTK
+      REAL, DIMENSION( its:ite ) :: USTK2
 !... Parameters
       REAL, PARAMETER :: RV     = 461.5
       REAL, PARAMETER :: RC     = 0.25
@@ -919,16 +920,20 @@ CONTAINS
       ILX = ite 
       KL  = kte
       KLM = kte - 1
+
+      USTK2 = 0.0
       
       DO K = kts,KLM
         DO I = its,ILX
           EDYZ = 0.0
           ZOVL = 0.0
           DZF  = ZA(I,K+1) - ZA(I,K)
+          DZZ  = ZF(I,K) -ZF(I,K-1)
           KZO = EDYZ0
           IF(ispxurb) THEN
             IF(K.LT.KSL(I)) THEN
-               USTK = UST_WL(I,K) + UST(I)  
+               USTK2(I) = USTK2(I) + UST_WL(I,K)**2 * DZZ     
+               USTK = SQRT( USTK2(I) / ZF(I,K) + UST(I)**2)      
             ELSE 
                USTK = USTT(I)
             ENDIF
@@ -999,15 +1004,15 @@ CONTAINS
             FM = PR*FH + 0.00104
 
             if(K.EQ.KSL(I)) then
-              EDDYZ(I,K) = KZO + SQRT(SS) * FH * SQL + (UST_WL(I,K)+UST_RF(I)) * MIXWL
-              EDDYZM(I,K) = KZO + SQRT(SS) * FM * SQL + (UST_WL(I,K)+UST_RF(I)) * MIXWL
+              EDDYZ(I,K) = KZO + SQRT(SS) * FH * SQL + sqrt(UST_WL(I,K)**2+UST_RF(I)**2) * MIXWL
+              EDDYZM(I,K) = KZO + SQRT(SS) * FM * SQL + sqrt(UST_WL(I,K)**2+UST_RF(I)**2) * MIXWL
             else
               EDDYZ(I,K) = KZO + SQRT(SS) * FH * SQL + UST_WL(I,K) * MIXWL
               EDDYZM(I,K) = KZO + SQRT(SS) * FM * SQL + UST_WL(I,K) * MIXWL
             endif
           ELSE
             if(K.EQ.KSL(I)) then
-              EDDYZ(I,K) = KZO + SQRT(SS * (1.0 - 25.0 * RI)) * SQL + (UST_WL(I,K)+UST_RF(I))*MIXWL
+              EDDYZ(I,K) = KZO + SQRT(SS*(1.0-25.0*RI))*SQL+sqrt(UST_WL(I,K)**2+UST_RF(I)**2)*MIXWL
             else
               EDDYZ(I,K) = KZO + SQRT(SS * (1.0 - 25.0 * RI)) * SQL + UST_WL(I,K)*MIXWL
             endif
@@ -2159,7 +2164,7 @@ CONTAINS
       INTEGER :: IDIR,ihr
 ! testing
       real UST_ST_U,UST_ST_V,UST_RF_U,UST_RF_V,UST_WL_U,UST_WL_V
-      real time
+      real time,USTWL2
       LOGICAL :: LCZRUN = .TRUE.
 !
 !------------------Executables start here-----------------------
@@ -2187,7 +2192,7 @@ CONTAINS
       ENDDO
 
       if (ispxurb) then
-        UST_WL =0.
+        UST_WL =0.0
         DO I = its,ite
 
         !-DDY urban
@@ -2336,6 +2341,8 @@ CONTAINS
 !                  CO1   = WSTT * AA
                   CO1   = URBF(I) * (1. - LAMP(I))/(1-gamdis*LAMP(I))
                   CO3   = URBF(I) * LAMP(I)
+
+                USTWL2 = 0.0
                 DO idir = 1,2  ! 2 street dir
 !                  CO2   = DZF(I,K) * GAMDIS * AA
 !                  CO2   = DZF(I,K) * GAMDIS * URBF(I) / ((WSTT+BBDG) - BBDG**2 * RBPW)
@@ -2360,15 +2367,21 @@ CONTAINS
                   IF (K .EQ. kts) THEN
                     IMU(I,K,idir) = IMU(I,K,idir) + FMHU1 * CO1
                     IMV(I,K,idir) = IMV(I,K,idir) + FMHV1 * CO1
-                    UST_ST_U = sqrt(abs(FMHU1* US(I,KTS)* CO1)) 
-                    UST_ST_V = sqrt(abs(FMHV1* VS(I,KTS)* CO1))
+                    IF(idir.eq.1) Then
+                      UST_ST_U = abs(FMHU1* US(I,KTS)* CO1) 
+                      UST_ST_V = abs(FMHV1* VS(I,KTS)* CO1)
+                    ENDIF
+
                   ENDIF
 
                   IF (K .EQ. KSL(I)) THEN
                     IMU(I,K,idir) = IMU(I,K,idir) + FMHU2 * CO3
                     IMV(I,K,idir) = IMV(I,K,idir) + FMHV2 * CO3
-                    UST_RF_U = sqrt(abs(FMHU2* US(I,KSL(i))* CO3))
-                    UST_RF_V = sqrt(abs(FMHV2* VS(I,KSL(i))* CO3))
+                    IF(idir.eq.1) Then
+                      UST_RF_U = abs(FMHU2* US(I,KSL(i))* CO3)
+                      UST_RF_V = abs(FMHV2* VS(I,KSL(i))* CO3)
+                    ENDIF
+
                   ENDIF
 
                   IF (XTIME.EQ.1) THEN
@@ -2378,9 +2391,9 @@ CONTAINS
                     IMV(I,K,idir) = 0.
                   ENDIF
                   
-                  UST_WL(i,k) = UST_WL(i,k) + 0.632*MORT1 * sqrt(CO2)  !  sqrt(k Uort**2 fwl))
+                  USTWL2 = USTWL2 + 0.4*MORT1*MORT1 * CO2  !  sqrt(k Uort**2 fwl))
                 ENDDO ! 2 street dir
-
+                UST_WL(i,k) = sqrt(USTWL2)
                 ENDIF !-- end if gamdis
 
               ENDIF !-- end if drag flags
@@ -2401,8 +2414,8 @@ CONTAINS
 !               UST_WL(i,k) = sqrt(UST_WL_U + UST_WL_V)
 !             ENDDO
 !            USTOU_WL(I) = sqrt(UST_WL_U**2 + UST_WL_V**2)/HGTBDG(I)
-            UST_RF(I)   = sqrt(UST_RF_U**2 + UST_RF_V**2)
-            UST_ST(I)   = sqrt(UST_ST_U**2 + UST_ST_V**2)
+            UST_RF(I)   = sqrt(UST_RF_U + UST_RF_V)
+            UST_ST(I)   = sqrt(UST_ST_U + UST_ST_V)
             time = xtime*dtpbl  !s
             ihr = mod(int(time),3600)
 !            if(HGTBDG(I).gt.120.0.and.ihr.eq.0) then
